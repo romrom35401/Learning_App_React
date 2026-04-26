@@ -21,11 +21,11 @@
 | **Text Import** | Paste tab-separated or `term - definition` text |
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
 | **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
-| **Hints** | Reveal letters one by one — but you'll have to review the word! |
+| **Hints** | Reveal letters one by one — hinted words reviewed at the end! |
 | **Streak Rewards** | 🔥 Track your streak and unlock reward milestones |
+| **Light / Dark theme** | Toggle between dark glassmorphism and clean light mode |
 | **Shuffle** | Randomize word order at any time |
 | **Keyboard-first** | `Enter` to validate, `1`–`4` for MCQ, auto-focus everywhere |
-| **Dark UI** | Premium glassmorphism design with smooth animations |
 
 ---
 
@@ -66,13 +66,11 @@ Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
 - Use the **Shuffle** button to avoid memorizing order.
 - Switch the **accent bar** to match your target language.
 - Toggle **Term→Def / Def→Term** to practice in both directions.
-- Use **Hints** sparingly — hinted words are automatically added to review!
+- Use **Hints** sparingly — hinted words are reviewed at the very end!
 
 ---
 
 ## 📋 Word List Format
-
-The textarea accepts this simple format:
 
 ```
 hello - hola
@@ -87,14 +85,13 @@ thank you - gracias / merci
 
 **Option 1 — Text (recommended):**
 1. Open your Quizlet set → `⋯` menu → **Export**
-2. Choose **Tab** delimiter
-3. Click **Copy text**
-4. In VocabMaster, click **Import** → **Paste Text** → paste → **Parse Text** → **Confirm Import**
+2. Choose **Tab** delimiter → **Copy text**
+3. In VocabMaster → **Import** → **Paste Text** → paste → **Parse Text** → **Confirm**
 
 **Option 2 — PDF:**
 1. Open your Quizlet set → `⋯` menu → **Print** → **Save as PDF**
-2. In VocabMaster, click **Import** → **Upload PDF** → drag & drop or browse
-3. Review the preview and click **Confirm Import**
+2. In VocabMaster → **Import** → **Upload PDF** → browse or drag & drop
+3. Review the preview → **Confirm Import**
 
 ---
 
@@ -107,7 +104,17 @@ thank you - gracias / merci
 | [Tailwind CSS 3.4](https://tailwindcss.com) | Utility-first styling |
 | [Lucide React](https://lucide.dev) | Icon library |
 | [PDF.js](https://mozilla.github.io/pdf.js/) | Client-side PDF parsing |
-| ESLint 9 | Code linting |
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] **PDF Parsing** — Improve Quizlet PDF auto-parsing heuristics
+- [ ] **CSV / JSON Import** — Drag & drop support for more formats
+- [ ] **Statistics** — Visualize success rate per batch and session
+- [ ] **PWA** — Offline mode for learning on the go
+- [ ] **LocalStorage** — Save progress between sessions
+- [ ] **Spaced Repetition** — Smart scheduling based on difficulty
 
 ---
 
@@ -126,8 +133,6 @@ thank you - gracias / merci
 
 **MIT License** — Feel free to fork and improve!
 
-**Author:** romrom35401
-
-**Version:** 1.0 (2026)
+**Author:** romrom35401 · **Version:** 1.0 (2026)
 
 ⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
