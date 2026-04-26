@@ -26,7 +26,7 @@
 ```bash
 # Clone the repository
 git clone https://github.com/romrom35401/Learning_App_React.git
-cd Learning_App_React/vocab-app
+cd Learning_App_React/
 
 # Install dependencies
 npm install
