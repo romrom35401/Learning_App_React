@@ -136,7 +136,7 @@ npx tailwindcss init -p
 
 **Licence MIT** – N'hésitez pas à forker et à améliorer l'outil !
 
-**Auteur :** [Votre Nom/GitHub]
+**Auteur :** romrom35401
 
 **Version :** 1.0 (2026)
 
