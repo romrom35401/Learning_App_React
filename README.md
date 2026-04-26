@@ -111,7 +111,7 @@ thank you - gracias / merci
 
 ## 🗺️ Roadmap
 
-- [x] **PDF Parsing** — Worker-safe parsing + page counter cleanup (`3 / 3`)
+- [x] **PDF Parsing** — Worker-safe parsing
 - [ ] **CSV / JSON Import** — Drag & drop support for more formats
 - [ ] **Statistics** — Visualize success rate per batch and session
 - [ ] **PWA** — Offline mode for learning on the go
