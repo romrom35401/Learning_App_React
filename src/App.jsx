@@ -71,6 +71,16 @@ const parseQuizletPdf = async (file) => {
       /^\d+\s*\/\s*\d+$/.test(s) ||
       /^study online at\b/i.test(s);
   };
+  const isHeaderLikeRow = (text) => {
+    const s = clean(text || '');
+    if (!s) return true;
+    if (/^study online at\b/i.test(s)) return true;
+    if (/quizlet\.com/i.test(s)) return true;
+    // Typical Quizlet printed set title, e.g. "4_Fahrenheit 451 (1953)"
+    if (/^\d+_[^()]+?\(\d{4}\)$/.test(s)) return true;
+    return false;
+  };
+  const stripLeadingNumber = (text) => clean((text || '').replace(/^\d+\s*[.)-]?\s*/, ''));
   const splitDashLine = (raw) => {
     const line = clean(raw);
     if (!line) return null;
@@ -141,7 +151,7 @@ const parseQuizletPdf = async (file) => {
       return rows.map(row => {
         const sorted = [...row.items].sort((a, b) => a.transform[4] - b.transform[4]);
         return { y: row.y, text: clean(sorted.map(i => i.str).join(' ')) };
-      }).filter(r => r.text.length > 0);
+      }).filter(r => r.text.length > 0 && !isHeaderLikeRow(r.text));
     };
 
     const leftRows = groupIntoRows(leftItems);
@@ -219,6 +229,34 @@ const parseQuizletPdf = async (file) => {
       continue;
     }
 
+    // If only one side has numbering, use it as anchor and pair by y.
+    if (termEntries.length > 0 && defEntries.length === 0 && rightRows.length > 0) {
+      const usedRight = new Set();
+      for (const term of termEntries) {
+        const closestRightIdx = rightRows
+          .map((row, idx) => ({ row, idx }))
+          .filter(({ idx }) => !usedRight.has(idx))
+          .sort((a, b) => Math.abs(a.row.y - term.y) - Math.abs(b.row.y - term.y))[0]?.idx;
+        if (closestRightIdx == null) continue;
+        usedRight.add(closestRightIdx);
+        pushPair(term.text, stripLeadingNumber(rightRows[closestRightIdx].text));
+      }
+      continue;
+    }
+    if (defEntries.length > 0 && termEntries.length === 0 && leftRows.length > 0) {
+      const usedLeft = new Set();
+      for (const def of defEntries) {
+        const closestLeftIdx = leftRows
+          .map((row, idx) => ({ row, idx }))
+          .filter(({ idx }) => !usedLeft.has(idx))
+          .sort((a, b) => Math.abs(a.row.y - def.y) - Math.abs(b.row.y - def.y))[0]?.idx;
+        if (closestLeftIdx == null) continue;
+        usedLeft.add(closestLeftIdx);
+        pushPair(stripLeadingNumber(leftRows[closestLeftIdx].text), def.text);
+      }
+      continue;
+    }
+
     // Last-resort fallback: pair rows by vertical proximity/index even without visible numbering.
     const usedRight = new Set();
     for (const leftRow of leftRows) {
@@ -228,7 +266,7 @@ const parseQuizletPdf = async (file) => {
         .sort((a, b) => Math.abs(a.row.y - leftRow.y) - Math.abs(b.row.y - leftRow.y))[0]?.idx;
       if (closestRightIdx == null) continue;
       usedRight.add(closestRightIdx);
-      pushPair(leftRow.text, rightRows[closestRightIdx].text);
+      pushPair(stripLeadingNumber(leftRow.text), stripLeadingNumber(rightRows[closestRightIdx].text));
     }
   }
 
