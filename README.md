@@ -121,7 +121,7 @@ thank you - gracias / merci
 
 MIT — feel free to fork and improve!
 
-<<<<<<< HEAD
+
 ⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
 =======
 ------
