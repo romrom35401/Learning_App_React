@@ -121,4 +121,39 @@ thank you - gracias / merci
 
 MIT — feel free to fork and improve!
 
+<<<<<<< HEAD
 ⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
+=======
+------
+
+## 🤖 Roadmap (Ajouts futurs)
+
+- [ ] **PDF Quizlet :** Parsing automatique côté client via PDF.js.
+- [ ] **Import CSV/JSON :** Support du Drag & drop.
+- [ ] **Statistiques :** Visualisation du taux de réussite par série.
+- [ ] **Thèmes :** Support automatique du mode sombre/clair.
+- [ ] **PWA :** Mode hors-ligne pour réviser partout.
+- [ ] **Export :** Sauvegarde de la progression dans le LocalStorage.
+
+------
+
+## 🐛 Résolution de problèmes
+
+| **Problème**             | **Solution**                                                 |
+| ------------------------ | ------------------------------------------------------------ |
+| Erreurs ESLint           | `npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh` |
+| Pas de mots au démarrage | Vérifiez la constante `PDF_WORDS` dans `App.jsx`             |
+| Bug bouton override      | Mise à jour de la fonction `nextWritingStep()`               |
+| Accents sur mobile       | Utilisation du focus auto pour déclencher le clavier natif   |
+
+------
+
+## 📄 Licence & Contribution
+
+**Licence MIT** – N'hésitez pas à forker et à améliorer l'outil !
+
+**Auteur :** romrom35401
+
+**Version :** 1.0 (2026)
+
+⭐ **Star si utile !** Partagez vos listes de vocabulaire ou proposez des fonctionnalités via les *Issues*.
