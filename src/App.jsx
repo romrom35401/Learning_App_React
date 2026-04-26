@@ -425,6 +425,8 @@ export default function App() {
   const [totalCorrect, setTotalCorrect] = useState(0);
   const [totalAttempts, setTotalAttempts] = useState(0);
   const [showStreakPopup, setShowStreakPopup] = useState(null);
+  const [pendingStreakReward, setPendingStreakReward] = useState(null);
+  const [isHintedReviewRound, setIsHintedReviewRound] = useState(false);
 
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
@@ -461,7 +463,26 @@ export default function App() {
   const getHintText = useCallback((word, level) => {
     if (!word || level <= 0) return '';
     const answer = direction === 'term_to_def' ? word.def : word.term;
-    return answer.split('').map((c, i) => i < level ? c : '_').join('');
+    const chars = answer.split('');
+    const prioritizedIndexes = [];
+    const stopWords = new Set(['to', 'the', 'a', 'an', 'of']);
+    const wordRegex = /[A-Za-zÀ-ÖØ-öø-ÿ]+/g;
+    let match;
+    while ((match = wordRegex.exec(answer)) !== null) {
+      const token = match[0].toLowerCase();
+      if (stopWords.has(token)) continue;
+      prioritizedIndexes.push(match.index);
+    }
+    if (prioritizedIndexes.length === 0) {
+      for (let i = 0; i < chars.length; i++) {
+        if (chars[i].trim() !== '') prioritizedIndexes.push(i);
+      }
+    }
+    const visible = new Set(prioritizedIndexes.slice(0, Math.max(1, level)));
+    return chars.map((c, i) => {
+      if (c.trim() === '') return ' ';
+      return visible.has(i) ? c : ' ';
+    }).join('');
   }, [direction]);
 
   // ---- Streak ----
@@ -481,10 +502,9 @@ export default function App() {
     if (newStreak > bestStreak) setBestStreak(newStreak);
     const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
     if (reward) {
-      setShowStreakPopup(reward);
-      scheduleStreakPopupClose();
+      setPendingStreakReward(reward);
     }
-  }, [streak, bestStreak, scheduleStreakPopupClose]);
+  }, [streak, bestStreak]);
 
   const handleWrongAnswer = useCallback(() => {
     streakBeforeMistakeRef.current = streak;
@@ -513,8 +533,10 @@ export default function App() {
     setUsedHintOnCurrent(false);
     setHintedWordsQueue([]);
     setIsReviewRound(false);
+    setIsHintedReviewRound(false);
     setSessionWords([]);
     setShowStreakPopup(null);
+    setPendingStreakReward(null);
     if (streakPopupTimeoutRef.current) {
       clearTimeout(streakPopupTimeoutRef.current);
       streakPopupTimeoutRef.current = null;
@@ -588,6 +610,7 @@ export default function App() {
     setHintLevel(0);
     setUsedHintOnCurrent(false);
     setIsReviewRound(true);
+    setIsHintedReviewRound(false);
 
     if (appPhase === 'quiz_review_check') {
       setAppPhase('quiz');
@@ -614,6 +637,7 @@ export default function App() {
     setHintLevel(0);
     setUsedHintOnCurrent(false);
     setIsReviewRound(true);
+    setIsHintedReviewRound(true);
   };
 
   // ---- Quiz (MCQ) ----
@@ -730,13 +754,12 @@ export default function App() {
     if (newStreak > bestStreak) setBestStreak(newStreak);
     const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
     if (reward) {
-      setShowStreakPopup(reward);
-      scheduleStreakPopupClose();
+      setPendingStreakReward(reward);
     }
     streakBeforeMistakeRef.current = 0;
     setTotalCorrect(prev => prev + 1);
     proceedToNextWritingStep(newFailed);
-  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, streak, bestStreak, scheduleStreakPopupClose]);
+  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, streak, bestStreak]);
 
   const handleWritingSubmit = (e) => {
     e.preventDefault();
@@ -771,8 +794,8 @@ export default function App() {
       if (!usedHintOnCurrent) handleCorrectAnswer();
       // Remove from failedInPhase if previously failed (review round)
       setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id));
-      // If we're reviewing hinted words and got it right, remove from hinted queue
-      if (isReviewRound) {
+      // Only clear hinted words in the dedicated hinted review batch.
+      if (isHintedReviewRound) {
         setHintedWordsQueue(prev => prev.filter(w => w.id !== currentWord.id));
       }
       setShowOverrideButton(false);
@@ -791,7 +814,7 @@ export default function App() {
     if (!failedInPhase.some(w => w.id === currentWord.id)) {
       setFailedInPhase(prev => [...prev, currentWord]);
     }
-    setShowOverrideButton(true);
+    setShowOverrideButton(false);
   }, [feedback, queue, currentIndex, failedInPhase, recordAttempt]);
 
   // ---- Import Handlers ----
@@ -855,6 +878,14 @@ export default function App() {
   };
 
   // ---- Effects ----
+  useEffect(() => {
+    const inQuestionPhase = appPhase === 'quiz' || appPhase === 'writing';
+    if (!pendingStreakReward || !inQuestionPhase || feedback !== null) return;
+    setShowStreakPopup(pendingStreakReward);
+    setPendingStreakReward(null);
+    scheduleStreakPopupClose();
+  }, [pendingStreakReward, appPhase, feedback, currentIndex, scheduleStreakPopupClose]);
+
   useEffect(() => {
     if (appPhase === 'writing' && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -1002,7 +1033,8 @@ export default function App() {
   };
 
   const StreakPopup = () => {
-    if (!showStreakPopup) return null;
+    const inQuestionPhase = appPhase === 'quiz' || appPhase === 'writing';
+    if (!showStreakPopup || !inQuestionPhase) return null;
     return (
       <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 animate-bounce-in">
         <div className={`bg-gradient-to-r ${showStreakPopup.color} px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3`}>
@@ -1385,11 +1417,11 @@ export default function App() {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-indigo-50'}`}>
         <StreakPopup />
-        <div className="w-full max-w-2xl space-y-4 animate-fade-in">
+        <div className="w-full max-w-2xl space-y-6 animate-fade-in">
           <HeaderInfo />
           <ProgressBar isDark={isDark} current={currentIndex + 1} total={queue.length} color="from-indigo-500 to-purple-500" />
 
-          <Card isDark={isDark} elevated className="min-h-[380px] flex flex-col items-center justify-center p-8 relative">
+          <Card isDark={isDark} elevated className="min-h-[420px] flex flex-col items-center justify-center p-10 md:p-12 relative">
             {isReviewRound && (
               <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border
                 ${isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
@@ -1398,9 +1430,9 @@ export default function App() {
             )}
 
             <span className={`text-xs uppercase tracking-[0.2em] font-bold mb-4 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Find the translation</span>
-            <h2 className={`text-3xl md:text-4xl font-black text-center mb-10 ${isDark ? 'text-white' : 'text-slate-800'}`}>{getQuestion(currentWord)}</h2>
+            <h2 className={`text-3xl md:text-4xl font-black text-center mb-12 ${isDark ? 'text-white' : 'text-slate-800'}`}>{getQuestion(currentWord)}</h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
               {mcqOptions.map((option, index) => {
                 let cls = isDark
                   ? "bg-white/5 border-white/10 hover:bg-indigo-500/10 hover:border-indigo-500/30 text-white/80"
@@ -1493,7 +1525,7 @@ export default function App() {
           </p>
           <div className={`rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left ${isDark ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-amber-50 border border-amber-200'}`}>
             {failedInPhase.map(w => (
-              <div key={w.id} className={`text-sm py-1.5 border-b last:border-0 ${isDark ? 'border-amber-500/10 text-amber-300/80' : 'border-amber-100 text-amber-800'}`}>• {w.term}</div>
+              <div key={w.id} className={`text-sm py-1.5 border-b last:border-0 ${isDark ? 'border-amber-500/10 text-amber-300/80' : 'border-amber-100 text-amber-800'}`}>• {getQuestion(w)}</div>
             ))}
           </div>
           <button onClick={handleStartReview} className="btn-warning w-full"><Edit3 className="w-4 h-4" /> Fix Mistakes</button>
@@ -1513,15 +1545,30 @@ export default function App() {
 
     const correctAnswer = getAnswer(currentWord);
     const isLocked = feedback === 'correct' || feedback === 'incorrect';
+    const renderAnswerWithHighlights = (user, correct) => {
+      const u = user || '';
+      const c = correct || '';
+      const maxLen = Math.max(u.length, c.length);
+      return [...Array(maxLen)].map((_, i) => {
+        const userChar = u[i] ?? '';
+        const correctChar = c[i] ?? '';
+        const isWrong = userChar && userChar.toLowerCase() !== correctChar.toLowerCase();
+        return (
+          <span key={i} className={isWrong ? (isDark ? 'font-black text-rose-200' : 'font-black text-rose-700') : ''}>
+            {userChar || ' '}
+          </span>
+        );
+      });
+    };
 
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-emerald-50'}`}>
         <StreakPopup />
-        <div className="w-full max-w-xl space-y-4 animate-fade-in">
+        <div className="w-full max-w-2xl space-y-6 animate-fade-in">
           <HeaderInfo />
           <ProgressBar isDark={isDark} current={currentIndex + 1} total={queue.length} color="from-emerald-500 to-teal-400" />
 
-          <Card isDark={isDark} elevated className="p-8 relative">
+          <Card isDark={isDark} elevated className="p-10 md:p-12 relative">
             {isReviewRound && (
               <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border
                 ${isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
@@ -1529,30 +1576,30 @@ export default function App() {
               </div>
             )}
 
-            <span className={`text-xs uppercase tracking-[0.2em] font-bold mb-2 block text-center ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Translate this term</span>
-            <h2 className={`text-3xl font-black text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>{getQuestion(currentWord)}</h2>
+            <span className={`text-xs uppercase tracking-[0.2em] font-bold mb-3 block text-center ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Translate this term</span>
+            <h2 className={`text-3xl font-black text-center mb-4 ${isDark ? 'text-white' : 'text-slate-800'}`}>{getQuestion(currentWord)}</h2>
 
             {hintLevel > 0 && feedback === null && (
-              <div className="text-center mb-2">
-                <span className={`font-mono text-lg tracking-[0.3em] ${isDark ? 'text-indigo-400/60' : 'text-indigo-500/60'}`}>
+              <div className="text-center mb-4">
+                <span className={`font-mono text-lg whitespace-pre ${isDark ? 'text-indigo-400/60' : 'text-indigo-500/60'}`}>
                   {getHintText(currentWord, hintLevel)}
                 </span>
               </div>
             )}
 
             {feedback === null && (
-              <div className="flex justify-center mb-4">
+              <div className="flex justify-center mb-5">
                 <button type="button" onClick={handleUseHint}
                   className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all
                     ${isDark ? 'text-white/30 hover:text-indigo-400 hover:bg-indigo-500/10' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}>
                   <Eye className="w-3.5 h-3.5" />
-                  Hint ({hintLevel}/{correctAnswer.length})
+                  Hint ({hintLevel})
                   {usedHintOnCurrent && <span className="text-amber-400 ml-1">⚠ reviewed at end</span>}
                 </button>
               </div>
             )}
 
-            <form onSubmit={handleWritingSubmit} className="space-y-4">
+            <form onSubmit={handleWritingSubmit} className="space-y-6">
               <AccentsBar />
               <div className="relative">
                 <input ref={inputRef} autoFocus type="text" value={inputValue}
@@ -1571,6 +1618,8 @@ export default function App() {
 
               {feedback === 'incorrect' && (
                 <div className={`p-4 rounded-xl text-center animate-slide-down ${isDark ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-rose-50 border border-rose-200'}`}>
+                  <p className={`text-xs font-bold uppercase mb-1 tracking-wide ${isDark ? 'text-rose-400/60' : 'text-rose-400'}`}>Your answer:</p>
+                  <p className={`text-lg font-mono mb-3 ${isDark ? 'text-rose-100/90' : 'text-rose-900/90'}`}>{renderAnswerWithHighlights(inputValue, correctAnswer)}</p>
                   <p className={`text-xs font-bold uppercase mb-1 tracking-wide ${isDark ? 'text-rose-400/60' : 'text-rose-400'}`}>Correct answer:</p>
                   <p className={`text-xl font-bold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>{correctAnswer}</p>
                 </div>
