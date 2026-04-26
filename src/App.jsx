@@ -82,6 +82,15 @@ const parseQuizletPdf = async (file) => {
     if (!term || !def) return null;
     return { term, def };
   };
+  const pushPair = (termRaw, defRaw) => {
+    const term = clean(termRaw || '');
+    const def = clean(defRaw || '');
+    if (!term || !def) return;
+    const dedupeKey = `${term}__${def}`;
+    if (seenPairs.has(dedupeKey)) return;
+    seenPairs.add(dedupeKey);
+    allParsedWords.push({ id: allParsedWords.length, term, def });
+  };
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
@@ -111,11 +120,7 @@ const parseQuizletPdf = async (file) => {
       const matches = [...text.matchAll(/(\d+)[.)]\s*(.+?)(?=\d+[.)]\s*|$)/g)];
       for (const m of matches) {
         const parsed = splitDashLine(m[2]);
-        if (!parsed) continue;
-        const dedupeKey = `${parsed.term}__${parsed.def}`;
-        if (seenPairs.has(dedupeKey)) continue;
-        seenPairs.add(dedupeKey);
-        allParsedWords.push({ id: allParsedWords.length, term: parsed.term, def: parsed.def });
+        if (parsed) pushPair(parsed.term, parsed.def);
       }
       continue;
     }
@@ -156,14 +161,31 @@ const parseQuizletPdf = async (file) => {
 
     const rowsToEntries = (rows) => {
       const entries = [];
+      let pendingNum = null;
       for (const row of rows) {
-        const numMatch = row.text.match(/^(\d+)[.)]\s*(.*)$/);
+        const numMatch = row.text.match(/^(\d+)\s*[.)-]?\s*(.*)$/);
         if (numMatch) {
+          const parsedNum = parseInt(numMatch[1], 10);
+          const parsedText = clean(numMatch[2]);
+          if (!parsedText) {
+            pendingNum = { num: parsedNum, y: row.y };
+            continue;
+          }
           entries.push({
-            num: parseInt(numMatch[1], 10),
-            text: clean(numMatch[2]),
+            num: parsedNum,
+            text: parsedText,
             y: row.y,
           });
+          pendingNum = null;
+          continue;
+        }
+        if (pendingNum) {
+          entries.push({
+            num: pendingNum.num,
+            text: row.text,
+            y: row.y,
+          });
+          pendingNum = null;
           continue;
         }
         const last = entries[entries.length - 1];
@@ -178,22 +200,35 @@ const parseQuizletPdf = async (file) => {
 
     const termEntries = rowsToEntries(leftRows);
     const defEntries = rowsToEntries(rightRows);
-    const defsByNum = new Map(defEntries.map(e => [e.num, e]));
-    const usedDefs = new Set();
+    const hasNumberedEntries = termEntries.length > 0 && defEntries.length > 0;
 
-    for (const term of termEntries) {
-      let def = defsByNum.get(term.num);
-      if (!def) {
-        def = defEntries
-          .filter(candidate => !usedDefs.has(candidate.num))
-          .sort((a, b) => Math.abs(a.y - term.y) - Math.abs(b.y - term.y))[0];
+    if (hasNumberedEntries) {
+      const defsByNum = new Map(defEntries.map(e => [e.num, e]));
+      const usedDefs = new Set();
+      for (const term of termEntries) {
+        let def = defsByNum.get(term.num);
+        if (!def) {
+          def = defEntries
+            .filter(candidate => !usedDefs.has(candidate.num))
+            .sort((a, b) => Math.abs(a.y - term.y) - Math.abs(b.y - term.y))[0];
+        }
+        if (!term.text || !def?.text) continue;
+        usedDefs.add(def.num);
+        pushPair(term.text, def.text);
       }
-      if (!term.text || !def?.text) continue;
-      usedDefs.add(def.num);
-      const dedupeKey = `${term.text}__${def.text}`;
-      if (seenPairs.has(dedupeKey)) continue;
-      seenPairs.add(dedupeKey);
-      allParsedWords.push({ id: allParsedWords.length, term: term.text, def: def.text });
+      continue;
+    }
+
+    // Last-resort fallback: pair rows by vertical proximity/index even without visible numbering.
+    const usedRight = new Set();
+    for (const leftRow of leftRows) {
+      const closestRightIdx = rightRows
+        .map((row, idx) => ({ row, idx }))
+        .filter(({ idx }) => !usedRight.has(idx))
+        .sort((a, b) => Math.abs(a.row.y - leftRow.y) - Math.abs(b.row.y - leftRow.y))[0]?.idx;
+      if (closestRightIdx == null) continue;
+      usedRight.add(closestRightIdx);
+      pushPair(leftRow.text, rightRows[closestRightIdx].text);
     }
   }
 
