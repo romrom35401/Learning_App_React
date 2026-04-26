@@ -21,7 +21,7 @@
 | **Text Import** | Paste tab-separated or `term - definition` text |
 | **CSV / JSON Import** | Drag & drop `.csv` and `.json` vocabulary files |
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
-| **Custom languages** | Add your own accents/alphabet (e.g. Russian, Chinese chars) |
+| **Custom languages** | Add your own accents/alphabet via "➕ Add a language..." in the dropdown |
 | **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
 | **Hints** | Reveal letters one by one — hinted words reviewed at the end! |
 | **Don't know buttons** | One-click "Don't know" in both MCQ and writing modes |
@@ -120,6 +120,8 @@ thank you - gracias / merci
 - [x] **Statistics** — Visualize success rate during session (accuracy)
 - [ ] **PWA** — Offline mode for learning on the go
 - [x] **LocalStorage** — Save setup/import/theme/language options between sessions
+- [x] **PDF Extraction v2** — Position-based two-column parser (fixes column-mixing bug)
+- [x] **Focus fix** — Textarea stays focused while typing in the home screen
 - [ ] **Spaced Repetition** — Smart scheduling based on difficulty
 
 ---
@@ -139,6 +141,6 @@ thank you - gracias / merci
 
 **MIT License** — Feel free to fork and improve!
 
-**Author:** romrom35401 · **Version:** 1.0 (2026)
+**Author:** romrom35401 · **Version:** 1.1 (2026)
 
 ⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
