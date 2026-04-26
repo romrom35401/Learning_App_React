@@ -57,78 +57,147 @@ const checkAnswer = (userInput, correctDef) => {
 
 const wordsToTextarea = (words) => words.map(w => `${w.term} - ${w.def}`).join('\n');
 
-// --- Quizlet PDF Parser ---
+// --- Quizlet PDF Parser (position-based two-column extraction) ---
 const parseQuizletPdf = async (file) => {
   const arrayBuffer = await file.arrayBuffer();
-  // Parse on the main thread to avoid worker loading issues in some Vite setups.
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
-  const words = [];
-  const stripPageArtifacts = (value) => (
-    value
-      .replace(/\b\d+\s*\/\s*\d+\b/g, ' ') // page markers like "3 / 3"
-      .replace(/\s+/g, ' ')
-      .trim()
-  );
+  const allParsedWords = [];
+  const seenPairs = new Set();
 
-  for (let i = 0; i < pdf.numPages; i++) {
-    const page = await pdf.getPage(i + 1);
+  const clean = (value) => value.replace(/\s+/g, ' ').trim();
+  const isJunk = (str) => {
+    const s = clean(str || '');
+    return s.length === 0 ||
+      /^\d+\s*\/\s*\d+$/.test(s) ||
+      /^study online at\b/i.test(s);
+  };
+  const splitDashLine = (raw) => {
+    const line = clean(raw);
+    if (!line) return null;
+    const dashMatch = line.match(/\s[-–—]\s/);
+    if (!dashMatch || dashMatch.index == null) return null;
+    const idx = dashMatch.index;
+    const term = clean(line.slice(0, idx));
+    const def = clean(line.slice(idx + dashMatch[0].length));
+    if (!term || !def) return null;
+    return { term, def };
+  };
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const text = content.items
-      .map(item => item.str)
-      .filter(str => !/^\s*\d+\s*\/\s*\d+\s*$/.test(str)) // remove isolated page counters
-      .join(' ');
+    const items = content.items.filter(item => item.str && !isJunk(item.str));
+    if (items.length === 0) continue;
 
-    const matches = text.matchAll(/(\d+)\.\s*(.+?)(?=\d+\.|$)/g);
-    for (const match of matches) {
-      const fullLine = stripPageArtifacts(match[2].trim());
-      if (/^\d+\s*\/\s*\d+$/.test(fullLine)) continue;
-      if (fullLine.startsWith('Study online at')) continue;
-      if (fullLine.length > 0) {
-        words.push({ rawLine: fullLine, num: parseInt(match[1]) });
+    const xVals = items.map(item => item.transform[4]).sort((a, b) => a - b);
+    const xMin = xVals[0];
+    const xMax = xVals[xVals.length - 1];
+    let splitX = (xMin + xMax) / 2;
+    let biggestGap = 0;
+    for (let i = 1; i < xVals.length; i++) {
+      const gap = xVals[i] - xVals[i - 1];
+      if (gap > biggestGap && xVals[i - 1] - xMin > 40 && xMax - xVals[i] > 40) {
+        biggestGap = gap;
+        splitX = (xVals[i] + xVals[i - 1]) / 2;
       }
+    }
+
+    const leftItems = items.filter(item => item.transform[4] < splitX);
+    const rightItems = items.filter(item => item.transform[4] >= splitX);
+
+    // Fallback for non-column PDFs
+    if (leftItems.length === 0 || rightItems.length === 0) {
+      const text = clean(items.map(i => i.str).join(' '));
+      const matches = [...text.matchAll(/(\d+)[.)]\s*(.+?)(?=\d+[.)]\s*|$)/g)];
+      for (const m of matches) {
+        const parsed = splitDashLine(m[2]);
+        if (!parsed) continue;
+        const dedupeKey = `${parsed.term}__${parsed.def}`;
+        if (seenPairs.has(dedupeKey)) continue;
+        seenPairs.add(dedupeKey);
+        allParsedWords.push({ id: allParsedWords.length, term: parsed.term, def: parsed.def });
+      }
+      continue;
+    }
+
+    const ROW_TOL = 5;
+    const groupIntoRows = (list) => {
+      const rows = [];
+      for (const item of list) {
+        const y = item.transform[5];
+        let row = rows.find(r => Math.abs(r.y - y) <= ROW_TOL);
+        if (!row) {
+          row = { y, items: [] };
+          rows.push(row);
+        }
+        row.items.push(item);
+      }
+      rows.sort((a, b) => b.y - a.y);
+      return rows.map(row => {
+        const sorted = [...row.items].sort((a, b) => a.transform[4] - b.transform[4]);
+        return { y: row.y, text: clean(sorted.map(i => i.str).join(' ')) };
+      }).filter(r => r.text.length > 0);
+    };
+
+    const leftRows = groupIntoRows(leftItems);
+    const rightRows = groupIntoRows(rightItems);
+    const allRows = [...leftRows, ...rightRows].sort((a, b) => b.y - a.y);
+    let lineH = 14;
+    if (allRows.length >= 2) {
+      const gaps = [];
+      for (let i = 1; i < allRows.length; i++) {
+        const g = Math.abs(allRows[i - 1].y - allRows[i].y);
+        if (g > 1) gaps.push(g);
+      }
+      gaps.sort((a, b) => a - b);
+      lineH = gaps[Math.floor(gaps.length / 2)] || 14;
+    }
+    const CONT_THRESHOLD = lineH * 1.8;
+
+    const rowsToEntries = (rows) => {
+      const entries = [];
+      for (const row of rows) {
+        const numMatch = row.text.match(/^(\d+)[.)]\s*(.*)$/);
+        if (numMatch) {
+          entries.push({
+            num: parseInt(numMatch[1], 10),
+            text: clean(numMatch[2]),
+            y: row.y,
+          });
+          continue;
+        }
+        const last = entries[entries.length - 1];
+        if (!last) continue;
+        if (Math.abs(last.y - row.y) <= CONT_THRESHOLD) {
+          last.text = clean(`${last.text} ${row.text}`);
+          last.y = row.y;
+        }
+      }
+      return entries.filter(e => e.text.length > 0);
+    };
+
+    const termEntries = rowsToEntries(leftRows);
+    const defEntries = rowsToEntries(rightRows);
+    const defsByNum = new Map(defEntries.map(e => [e.num, e]));
+    const usedDefs = new Set();
+
+    for (const term of termEntries) {
+      let def = defsByNum.get(term.num);
+      if (!def) {
+        def = defEntries
+          .filter(candidate => !usedDefs.has(candidate.num))
+          .sort((a, b) => Math.abs(a.y - term.y) - Math.abs(b.y - term.y))[0];
+      }
+      if (!term.text || !def?.text) continue;
+      usedDefs.add(def.num);
+      const dedupeKey = `${term.text}__${def.text}`;
+      if (seenPairs.has(dedupeKey)) continue;
+      seenPairs.add(dedupeKey);
+      allParsedWords.push({ id: allParsedWords.length, term: term.text, def: def.text });
     }
   }
 
-  return words
-    .filter(w => !(/^\d+\s*\/\s*\d+$/.test(w.rawLine)))
-    .map((w, idx) => {
-      const line = w.rawLine;
-      if (line.includes('\t')) {
-        const parts = line.split('\t');
-        return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('\t').trim() };
-      }
-      if (line.includes(' - ')) {
-        const dashIdx = line.indexOf(' - ');
-        return { id: idx, term: line.slice(0, dashIdx).trim(), def: line.slice(dashIdx + 3).trim() };
-      }
-      const midPoint = findLanguageBoundary(line);
-      if (midPoint > 0 && midPoint < line.length - 1) {
-        return { id: idx, term: line.slice(0, midPoint).trim(), def: line.slice(midPoint).trim() };
-      }
-      const words_arr = line.split(/\s+/);
-      const mid = Math.ceil(words_arr.length / 2);
-      return { id: idx, term: words_arr.slice(0, mid).join(' '), def: words_arr.slice(mid).join(' ') };
-    })
-    .filter(w => w.term && w.def);
-};
-
-const findLanguageBoundary = (line) => {
-  const foreignIndicators = [
-    /\s(le|la|les|un|une|des|du|de|l'|en|au|aux)\s/i,
-    /\s(el|la|los|las|un|una|unos|unas|del|de|en|al)\s/i,
-    /\s(der|die|das|ein|eine|des|dem|den)\s/i,
-    /\s(il|lo|la|i|gli|le|un|una|del|di|in|al)\s/i,
-  ];
-  for (const pattern of foreignIndicators) {
-    const match = line.match(pattern);
-    if (match && match.index > 2) return match.index;
-  }
-  for (let i = 3; i < line.length - 3; i++) {
-    if (line[i] === ' ' && /[àâéèêëïîôùûçæœáéíóúüñäöüß]/.test(line.slice(i + 1, i + 10))) {
-      return i;
-    }
-  }
-  return -1;
+  return allParsedWords;
 };
 
 const parseQuizletText = (text) => {
@@ -202,6 +271,22 @@ const parseJsonImport = (text) => {
     }))
     .filter(w => w.term && w.def);
 };
+
+// ---- Stable module-level UI components (outside App to prevent re-mount on re-render) ----
+const Card = ({ children, className = '', elevated = false, isDark }) => (
+  <div className={`rounded-2xl overflow-hidden ${elevated
+    ? (isDark ? 'glass-card-elevated' : 'bg-white shadow-xl border border-slate-200')
+    : (isDark ? 'glass-card' : 'bg-white shadow-lg border border-slate-200')} ${className}`}>
+    {children}
+  </div>
+);
+
+const ProgressBar = ({ current, total, color = "from-indigo-500 to-indigo-400", isDark }) => (
+  <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>
+    <div className={`h-full transition-all duration-500 ease-out rounded-full bg-gradient-to-r ${color}`}
+      style={{ width: `${Math.min((current / total) * 100, 100)}%` }} />
+  </div>
+);
 
 const LOCAL_STORAGE_KEY = 'vocabmaster_state_v2';
 
@@ -747,8 +832,6 @@ export default function App() {
   const currentStreakReward = useMemo(() => [...STREAK_REWARDS].reverse().find(r => streak >= r.threshold) || null, [streak]);
   const isDark = theme === 'dark';
 
-  const handleApplySetupText = () => setAllWords(parsedSetupWords);
-
   const handleAddCustomPreset = () => {
     const label = newPresetName.trim();
     const rawChars = newPresetChars.trim();
@@ -834,12 +917,7 @@ export default function App() {
     </div>
   );
 
-  const ProgressBar = ({ current, total, color = "from-indigo-500 to-indigo-400" }) => (
-    <div className={`w-full h-2 rounded-full overflow-hidden ${isDark ? 'bg-white/5' : 'bg-slate-200'}`}>
-      <div className={`h-full transition-all duration-500 ease-out rounded-full bg-gradient-to-r ${color}`}
-        style={{ width: `${Math.min((current / total) * 100, 100)}%` }} />
-    </div>
-  );
+  // ProgressBar: defined at module level (above App)
 
   const AccentsBar = () => {
     if (accentChars.length === 0) return null;
@@ -855,14 +933,7 @@ export default function App() {
     );
   };
 
-  // Card wrapper for theme
-  const Card = ({ children, className = '', elevated = false }) => (
-    <div className={`rounded-2xl overflow-hidden ${elevated
-      ? (isDark ? 'glass-card-elevated' : 'bg-white shadow-xl border border-slate-200')
-      : (isDark ? 'glass-card' : 'bg-white shadow-lg border border-slate-200')} ${className}`}>
-      {children}
-    </div>
-  );
+  // Card: defined at module level (above App) to avoid focus-loss bug
 
   // ---- Import Modal ----
   const renderImportModal = () => {
@@ -1013,7 +1084,7 @@ export default function App() {
         {renderImportModal()}
         <StreakPopup />
         <div className="w-full max-w-2xl animate-fade-in">
-          <Card elevated>
+          <Card isDark={isDark} elevated>
             <div className="p-8 pb-0">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
@@ -1046,6 +1117,7 @@ export default function App() {
                   {Object.entries(languageOptions).map(([key, val]) => (
                     <option key={key} value={key} className={isDark ? 'bg-slate-800' : 'bg-white'}>{val.label}</option>
                   ))}
+                  <option value="__add_new__" className={isDark ? 'bg-slate-800' : 'bg-white'}>➕ Add a language...</option>
                 </select>
               </div>
 
@@ -1068,38 +1140,42 @@ export default function App() {
               </button>
             </div>
 
-            <div className="px-8 pb-4">
-              <div className={`p-4 rounded-xl border space-y-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
-                  Custom language accents / alphabet (Russian, Chinese, etc.)
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input
-                    value={newPresetName}
-                    onChange={(e) => setNewPresetName(e.target.value)}
-                    placeholder="Language name"
-                    className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
-                  />
-                  <input
-                    value={newPresetChars}
-                    onChange={(e) => setNewPresetChars(e.target.value)}
-                    placeholder="Chars (all together or space-separated)"
-                    className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
-                  />
-                </div>
-                <button onClick={handleAddCustomPreset} className="btn-secondary w-full">Add Custom Language</button>
-                {customPresets.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {customPresets.map(p => (
-                      <button key={p.key} onClick={() => handleRemoveCustomPreset(p.key)}
-                        className={`text-xs px-2 py-1 rounded-lg border ${isDark ? 'text-white/60 border-white/15 hover:bg-white/10' : 'text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                        Remove {p.label}
-                      </button>
-                    ))}
+            {selectedLanguage === '__add_new__' && (
+              <div className="px-8 pb-4 animate-slide-down">
+                <div className={`p-4 rounded-xl border space-y-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                  <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+                    New language — accents / alphabet (Russian, Chinese, etc.)
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={newPresetName}
+                      onChange={(e) => setNewPresetName(e.target.value)}
+                      placeholder="Language name"
+                      className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                    />
+                    <input
+                      value={newPresetChars}
+                      onChange={(e) => setNewPresetChars(e.target.value)}
+                      placeholder="Chars (all together or space-separated)"
+                      className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                    />
                   </div>
-                )}
+                  <button onClick={handleAddCustomPreset} className="btn-secondary w-full">Add Custom Language</button>
+                </div>
               </div>
-            </div>
+            )}
+            {customPresets.length > 0 && selectedLanguage !== '__add_new__' && (
+              <div className="px-8 pb-2">
+                <div className="flex flex-wrap gap-2">
+                  {customPresets.map(p => (
+                    <button key={p.key} onClick={() => handleRemoveCustomPreset(p.key)}
+                      className={`text-xs px-2 py-1 rounded-lg border ${isDark ? 'text-white/60 border-white/15 hover:bg-white/10' : 'text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
+                      ✕ Remove {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="px-8 pb-4">
               <textarea
@@ -1109,11 +1185,6 @@ export default function App() {
                 value={setupText}
                 onChange={(e) => setSetupText(e.target.value)}
               />
-              <div className="mt-3">
-                <button onClick={handleApplySetupText} className="btn-secondary w-full">
-                  Apply Text List ({parsedSetupWords.length} words)
-                </button>
-              </div>
             </div>
 
             <div className="px-8 pb-8">
@@ -1136,7 +1207,7 @@ export default function App() {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-amber-50'}`}>
         <StreakPopup />
-        <Card elevated className="w-full max-w-md p-8 text-center animate-slide-up">
+        <Card isDark={isDark} elevated className="w-full max-w-md p-8 text-center animate-slide-up">
           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 ${isDark ? 'bg-amber-500/20' : 'bg-amber-100'}`}>
             <RefreshCw className={`w-8 h-8 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
           </div>
@@ -1163,7 +1234,7 @@ export default function App() {
     const currentWord = queue[currentIndex];
     if (!currentWord) {
       return <div className={`min-h-screen flex items-center justify-center ${isDark ? 'gradient-bg' : 'bg-slate-50'}`}>
-        <Card className="p-8 text-center"><p className={isDark ? 'text-white/60' : 'text-slate-600'}>Error</p><button onClick={handleReset} className="btn-primary mt-4">Home</button></Card>
+        <Card isDark={isDark} className="p-8 text-center"><p className={isDark ? 'text-white/60' : 'text-slate-600'}>Error</p><button onClick={handleReset} className="btn-primary mt-4">Home</button></Card>
       </div>;
     }
 
@@ -1172,9 +1243,9 @@ export default function App() {
         <StreakPopup />
         <div className="w-full max-w-2xl space-y-4 animate-fade-in">
           <HeaderInfo />
-          <ProgressBar current={currentIndex + 1} total={queue.length} color="from-indigo-500 to-purple-500" />
+          <ProgressBar isDark={isDark} current={currentIndex + 1} total={queue.length} color="from-indigo-500 to-purple-500" />
 
-          <Card elevated className="min-h-[380px] flex flex-col items-center justify-center p-8 relative">
+          <Card isDark={isDark} elevated className="min-h-[380px] flex flex-col items-center justify-center p-8 relative">
             {isReviewRound && (
               <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border
                 ${isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
@@ -1242,7 +1313,7 @@ export default function App() {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 text-center ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-indigo-50'}`}>
         <StreakPopup />
-        <Card elevated className="p-12 max-w-lg w-full animate-bounce-in">
+        <Card isDark={isDark} elevated className="p-12 max-w-lg w-full animate-bounce-in">
           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 ${isDark ? 'bg-indigo-500/20' : 'bg-indigo-100'}`}>
             <Edit3 className={`w-8 h-8 ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`} />
           </div>
@@ -1268,7 +1339,7 @@ export default function App() {
   if (appPhase === 'writing_review_check') {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-amber-50'}`}>
-        <Card elevated className="w-full max-w-md p-8 text-center animate-slide-up">
+        <Card isDark={isDark} elevated className="w-full max-w-md p-8 text-center animate-slide-up">
           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 ${isDark ? 'bg-amber-500/20' : 'bg-amber-100'}`}>
             <Edit3 className={`w-8 h-8 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
           </div>
@@ -1292,7 +1363,7 @@ export default function App() {
     const currentWord = queue[currentIndex];
     if (!currentWord) {
       return <div className={`min-h-screen flex items-center justify-center ${isDark ? 'gradient-bg' : 'bg-slate-50'}`}>
-        <Card className="p-8 text-center"><p className={isDark ? 'text-white/60' : 'text-slate-600'}>Error</p><button onClick={handleReset} className="btn-primary mt-4">Home</button></Card>
+        <Card isDark={isDark} className="p-8 text-center"><p className={isDark ? 'text-white/60' : 'text-slate-600'}>Error</p><button onClick={handleReset} className="btn-primary mt-4">Home</button></Card>
       </div>;
     }
 
@@ -1304,9 +1375,9 @@ export default function App() {
         <StreakPopup />
         <div className="w-full max-w-xl space-y-4 animate-fade-in">
           <HeaderInfo />
-          <ProgressBar current={currentIndex + 1} total={queue.length} color="from-emerald-500 to-teal-400" />
+          <ProgressBar isDark={isDark} current={currentIndex + 1} total={queue.length} color="from-emerald-500 to-teal-400" />
 
-          <Card elevated className="p-8 relative">
+          <Card isDark={isDark} elevated className="p-8 relative">
             {isReviewRound && (
               <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border
                 ${isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
@@ -1404,7 +1475,7 @@ export default function App() {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 text-center ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-emerald-50'}`}>
         <StreakPopup />
-        <Card elevated className="p-12 max-w-lg w-full animate-bounce-in">
+        <Card isDark={isDark} elevated className="p-12 max-w-lg w-full animate-bounce-in">
           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 ${isDark ? 'bg-emerald-500/20' : 'bg-emerald-100'}`}>
             <Check className={`w-8 h-8 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
           </div>
@@ -1431,7 +1502,7 @@ export default function App() {
     if (hintedWordsQueue.length > 0) {
       return (
         <div className={`min-h-screen flex flex-col items-center justify-center p-4 ${isDark ? 'gradient-bg' : 'bg-gradient-to-br from-slate-50 to-purple-50'}`}>
-          <Card elevated className="w-full max-w-md p-8 text-center animate-slide-up">
+          <Card isDark={isDark} elevated className="w-full max-w-md p-8 text-center animate-slide-up">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'}`}>
               <Eye className={`w-8 h-8 ${isDark ? 'text-purple-400' : 'text-purple-600'}`} />
             </div>
