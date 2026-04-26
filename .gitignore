@@ -7,10 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build output
 dist
 dist-ssr
+
+# Environment
 *.local
+.env
+.env.*
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +29,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+Thumbs.db
+
+# Test PDFs (don't commit sample data)
+*.pdf

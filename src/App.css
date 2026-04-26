@@ -1,42 +1,63 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* App-specific utility classes */
+
+/* Shimmer loading effect */
+.shimmer-bg {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+/* Quiz option hover glow */
+.quiz-option {
+  position: relative;
+  overflow: hidden;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
+.quiz-option::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(99, 102, 241, 0.15), transparent 60%);
 }
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
-
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.quiz-option:hover::before {
+  opacity: 1;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+/* Drop zone styles */
+.drop-zone {
+  border: 2px dashed rgba(99, 102, 241, 0.3);
+  transition: all 0.3s;
+}
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: rgba(99, 102, 241, 0.6);
+  background: rgba(99, 102, 241, 0.05);
 }
 
-.card {
-  padding: 2em;
+/* Trophy glow animation */
+.trophy-glow {
+  animation: trophyPulse 2s ease-in-out infinite;
+}
+@keyframes trophyPulse {
+  0%, 100% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 60px rgba(16, 185, 129, 0.7), 0 0 100px rgba(16, 185, 129, 0.3); }
 }
 
-.read-the-docs {
-  color: #888;
+/* Floating particles for victory */
+.particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: float 3s ease-in-out infinite;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0deg); opacity: 0.7; }
+  50% { transform: translateY(-30px) rotate(180deg); opacity: 1; }
 }

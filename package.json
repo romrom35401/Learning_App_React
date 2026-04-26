@@ -1,7 +1,8 @@
 {
-  "name": "vocab-app",
+  "name": "vocab-master",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "A premium vocabulary learning app with quiz, writing practice, spaced repetition, and Quizlet PDF import.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +12,7 @@
   },
   "dependencies": {
     "lucide-react": "^0.555.0",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

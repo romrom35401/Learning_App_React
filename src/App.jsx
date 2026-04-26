@@ -1,55 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Book, Check, X, RefreshCw, ChevronRight, Edit3, Settings, Trophy, Brain, Keyboard, AlertCircle, Layers } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Book, Check, X, RefreshCw, ChevronRight, Edit3, Trophy,
+  Keyboard, Layers, Shuffle, Upload, FileText, Globe, ArrowLeft
+} from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import './App.css';
 
-// --- Composants Utilitaires ---
+// PDF.js worker setup
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
-const Button = ({ onClick, children, variant = 'primary', className = '', disabled = false, title = '', type = 'button' }) => {
-  const baseStyle = "px-6 py-3 rounded-xl font-bold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm active:scale-95 touch-manipulation";
-  const variants = {
-    primary: "bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-300",
-    secondary: "bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:bg-slate-100",
-    success: "bg-emerald-500 text-white hover:bg-emerald-600 disabled:bg-emerald-300",
-    outline: "border-2 border-slate-200 text-slate-600 hover:border-indigo-500 hover:text-indigo-600",
-    ghost: "bg-transparent text-slate-500 hover:bg-slate-100 p-2 px-3"
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      type={type}
-      className={`${baseStyle} ${variants[variant]} ${className}`}
-    >
-      {children}
-    </button>
-  );
+// --- Accent presets per language ---
+const ACCENT_PRESETS = {
+  spanish: { label: 'Español', chars: ['á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', '¡', '¿'] },
+  french: { label: 'Français', chars: ['à', 'â', 'é', 'è', 'ê', 'ë', 'ï', 'î', 'ô', 'ù', 'û', 'ç', 'æ', 'œ'] },
+  german: { label: 'Deutsch', chars: ['ä', 'ö', 'ü', 'ß', 'Ä', 'Ö', 'Ü'] },
+  portuguese: { label: 'Português', chars: ['á', 'â', 'ã', 'à', 'é', 'ê', 'í', 'ó', 'ô', 'õ', 'ú', 'ç'] },
+  italian: { label: 'Italiano', chars: ['à', 'è', 'é', 'ì', 'ò', 'ù'] },
+  none: { label: 'None', chars: [] },
 };
 
-const Card = ({ children, className = '' }) => (
-  <div className={`bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden ${className}`}>
-    {children}
-  </div>
-);
-
-const ProgressBar = ({ current, total, color = "bg-indigo-500" }) => (
-  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-    <div
-      className={`h-full transition-all duration-500 ${color}`}
-      style={{ width: `${Math.min((current / total) * 100, 100)}%` }}
-    />
-  </div>
-);
-
-// --- Données du PDF (Inteligencia Artificial) ---
-const PDF_WORDS = [
-
-];
-
-const DEFAULT_WORDS = PDF_WORDS;
 const BATCH_SIZE = 10;
 
-// Fonction pour mélanger un tableau (Fisher-Yates shuffle)
+// Fisher-Yates shuffle
 const shuffleArray = (array) => {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -59,11 +31,159 @@ const shuffleArray = (array) => {
   return shuffled;
 };
 
+// Normalize answer for comparison
+const normalizeAnswer = (answer) => answer.trim().toLowerCase();
+
+// Check answer against multiple valid answers separated by '/'
+const checkAnswer = (userInput, correctDef) => {
+  const validAnswers = correctDef.split('/').map(s => normalizeAnswer(s));
+  const userAns = normalizeAnswer(userInput);
+
+  if (validAnswers.includes(userAns)) return true;
+
+  if (userAns.includes('/')) {
+    const userParts = userAns.split('/').map(s => normalizeAnswer(s));
+    return userParts.every(part => validAnswers.includes(part));
+  }
+
+  return false;
+};
+
+// --- Quizlet PDF Parser ---
+const parseQuizletPdf = async (file) => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const words = [];
+
+  for (let i = 0; i < pdf.numPages; i++) {
+    const page = await pdf.getPage(i + 1);
+    const content = await page.getTextContent();
+    const text = content.items.map(item => item.str).join(' ');
+
+    // Quizlet format: "NUMBER.TERM DEFINITION" 
+    // We split by the numbered pattern
+    const matches = text.matchAll(/(\d+)\.\s*(.+?)(?=\d+\.|$)/g);
+    for (const match of matches) {
+      const fullLine = match[2].trim();
+      // Skip page numbers like "1 / 3" and header lines
+      if (/^\d+\s*\/\s*\d+$/.test(fullLine)) continue;
+      if (fullLine.startsWith('Study online at')) continue;
+
+      // The term and definition are on the same line
+      // Heuristic: split roughly in the middle where language changes
+      // For Quizlet, the format is typically: "ENGLISH_TERM FRENCH_DEFINITION"
+      // We need smarter splitting — look for the boundary
+      if (fullLine.length > 0) {
+        words.push({ rawLine: fullLine, num: parseInt(match[1]) });
+      }
+    }
+  }
+
+  // Now try to extract term/def pairs from raw lines
+  // Quizlet PDFs typically have "term definition" where there's a language boundary
+  const result = words
+    .filter(w => !(/^\d+\s*\/\s*\d+$/.test(w.rawLine)))
+    .map((w, idx) => {
+      const line = w.rawLine;
+
+      // Try common separators first
+      // Check for tab
+      if (line.includes('\t')) {
+        const parts = line.split('\t');
+        return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('\t').trim() };
+      }
+
+      // Check for " - " separator
+      if (line.includes(' - ')) {
+        const dashIdx = line.indexOf(' - ');
+        return { id: idx, term: line.slice(0, dashIdx).trim(), def: line.slice(dashIdx + 3).trim() };
+      }
+
+      // For Quizlet PDF without separator: detect language boundary
+      // by looking for first non-ASCII character or capital letter change pattern
+      // Heuristic: find a point where the language seems to switch
+      // We'll use a simple approach: find the longest match from the start
+      // that doesn't contain common French/Spanish/etc characters
+      const midPoint = findLanguageBoundary(line);
+      if (midPoint > 0 && midPoint < line.length - 1) {
+        return { id: idx, term: line.slice(0, midPoint).trim(), def: line.slice(midPoint).trim() };
+      }
+
+      // Fallback: split in half at a word boundary
+      const words_arr = line.split(/\s+/);
+      const mid = Math.ceil(words_arr.length / 2);
+      return {
+        id: idx,
+        term: words_arr.slice(0, mid).join(' '),
+        def: words_arr.slice(mid).join(' ')
+      };
+    })
+    .filter(w => w.term && w.def);
+
+  return result;
+};
+
+// Heuristic to find where language boundary might be in a Quizlet line
+const findLanguageBoundary = (line) => {
+  // Common patterns in Quizlet PDFs:
+  // "English text French text" or "French text English text"
+  // Look for common transition patterns
+
+  // Pattern: uppercase word followed by lowercase in different language
+  // Check for common French/Spanish articles/prepositions appearing
+  const foreignIndicators = [
+    /\s(le|la|les|un|une|des|du|de|l'|en|au|aux)\s/i,
+    /\s(el|la|los|las|un|una|unos|unas|del|de|en|al)\s/i,
+    /\s(der|die|das|ein|eine|des|dem|den)\s/i,
+    /\s(il|lo|la|i|gli|le|un|una|del|di|in|al)\s/i,
+  ];
+
+  // Find the first occurrence of a foreign article pattern
+  for (const pattern of foreignIndicators) {
+    const match = line.match(pattern);
+    if (match && match.index > 2) {
+      return match.index;
+    }
+  }
+
+  // Fallback: look for transition from ASCII to accented characters
+  for (let i = 3; i < line.length - 3; i++) {
+    if (line[i] === ' ' && /[àâéèêëïîôùûçæœáéíóúüñäöüß]/.test(line.slice(i + 1, i + 10))) {
+      return i;
+    }
+  }
+
+  return -1;
+};
+
+// --- Parse Quizlet text export (tab or custom delimiter) ---
+const parseQuizletText = (text, delimiter = '\t') => {
+  const lines = text.split('\n').filter(l => l.trim());
+  return lines.map((line, idx) => {
+    let parts;
+    if (delimiter === '\t' && line.includes('\t')) {
+      parts = line.split('\t');
+    } else if (line.includes(' - ')) {
+      parts = [line.split(' - ')[0], line.split(' - ').slice(1).join(' - ')];
+    } else if (line.includes('\t')) {
+      parts = line.split('\t');
+    } else {
+      parts = [line, ''];
+    }
+    return { id: idx, term: (parts[0] || '').trim(), def: (parts[1] || '').trim() };
+  }).filter(w => w.term && w.def);
+};
+
+
+// ============================================================
+// MAIN APP
+// ============================================================
 export default function App() {
   // Phases: setup, quiz, quiz_review_check, transition_to_writing, writing, writing_review_check, batch_complete, victory
-  const [appPhase, setAppPhase] = useState('setup'); 
-  const [allWords, setAllWords] = useState(DEFAULT_WORDS);
+  const [appPhase, setAppPhase] = useState('setup');
+  const [allWords, setAllWords] = useState([]);
   const [batchOffset, setBatchOffset] = useState(0);
+  const [selectedLanguage, setSelectedLanguage] = useState('spanish');
 
   const [queue, setQueue] = useState([]);
   const [failedInPhase, setFailedInPhase] = useState([]);
@@ -73,40 +193,20 @@ export default function App() {
 
   const [mcqOptions, setMcqOptions] = useState([]);
   const inputRef = useRef(null);
-  const correctTimeoutRef = useRef(null); // Pour stocker le timeout de l'animation "correct"
-
+  const correctTimeoutRef = useRef(null);
   const [showOverrideButton, setShowOverrideButton] = useState(false);
   const [selectedMcqOption, setSelectedMcqOption] = useState(null);
 
-  // Fonction utilitaire pour extraire/nettoyer les traductions
-  const normalizeAnswer = (answer) => {
-    return answer.trim().toLowerCase();
-  }
+  // Import modal
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importTab, setImportTab] = useState('text'); // 'text' | 'pdf'
+  const [importText, setImportText] = useState('');
+  const [importPreview, setImportPreview] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  // Fonction pour vérifier si une réponse est correcte (gère les multiples variantes)
-  const checkAnswer = (userInput, correctDef) => {
-    // Extraire toutes les réponses valides (séparées par '/')
-    const validAnswers = correctDef.split('/').map(s => normalizeAnswer(s));
-    
-    // Normaliser l'entrée utilisateur
-    const userAns = normalizeAnswer(userInput);
-    
-    // Cas 1 : L'utilisateur a tapé exactement une des variantes
-    if (validAnswers.includes(userAns)) {
-      return true;
-    }
-    
-    // Cas 2 : L'utilisateur a tapé avec un slash (on split et on vérifie chaque partie)
-    if (userAns.includes('/')) {
-      const userParts = userAns.split('/').map(s => normalizeAnswer(s));
-      // Si toutes les parties de l'utilisateur sont dans les réponses valides
-      return userParts.every(part => validAnswers.includes(part));
-    }
-    
-    return false;
-  };
-
-  // Fonction de réinitialisation complète
+  // ---- Reset ----
   const handleReset = () => {
     setAppPhase('setup');
     setFailedInPhase([]);
@@ -118,11 +218,10 @@ export default function App() {
     setCurrentIndex(0);
   };
 
-  // --- Logique de gestion des Séries (Batches) ---
-
+  // ---- Batch Management ----
   const handleStartFullSession = (customList = null) => {
     const listToUse = customList || allWords;
-    // Mélanger la liste avant de commencer
+    if (listToUse.length === 0) return;
     const shuffledList = shuffleArray(listToUse);
     setAllWords(shuffledList);
     setBatchOffset(0);
@@ -161,17 +260,19 @@ export default function App() {
     setFeedback(null);
   };
 
-  // --- Logique de Révision (Loop) ---
-
-  const handleStartReview = () => {
+  // ---- Review (Loop) ----
+  const handleStartReview = useCallback(() => {
+    setQueue(prev => {
+      // We need failedInPhase at call time
+      return failedInPhase;
+    });
     const reviewQueue = failedInPhase;
-    
-    setQueue(reviewQueue);
     setFailedInPhase([]);
     setCurrentIndex(0);
     setShowOverrideButton(false);
     setFeedback(null);
     setSelectedMcqOption(null);
+    setInputValue('');
 
     if (appPhase === 'quiz_review_check') {
       setAppPhase('quiz');
@@ -180,25 +281,23 @@ export default function App() {
       }
     } else if (appPhase === 'writing_review_check') {
       setAppPhase('writing');
-      setInputValue(''); 
     }
-  };
+    setQueue(reviewQueue);
+  }, [appPhase, failedInPhase, allWords]);
 
-  // --- Logique Quiz (QCM) ---
-
+  // ---- Quiz (MCQ) ----
   const generateMcqOptions = (correctWord, allWordsContext) => {
     if (!correctWord) return;
     const potentialDistractors = allWordsContext.filter(w => w.id !== correctWord.id);
-    
-    const safeDistractors = potentialDistractors.length > 0 ? potentialDistractors : allWordsContext.filter(w => w.id !== correctWord.id).slice(0, 3);
-
-    const shuffledDistractors = [...safeDistractors].sort(() => 0.5 - Math.random()).slice(0, 3);
+    const shuffledDistractors = [...potentialDistractors].sort(() => 0.5 - Math.random()).slice(0, 3);
     const options = [...shuffledDistractors, correctWord].sort(() => 0.5 - Math.random());
     setMcqOptions(options);
   };
 
-  const handleMcqAnswer = (selectedWord) => {
+  const handleMcqAnswer = useCallback((selectedWord) => {
+    if (feedback !== null) return; // Prevent double-click
     const currentWord = queue[currentIndex];
+    if (!currentWord) return;
     const isCorrect = selectedWord.id === currentWord.id;
 
     setSelectedMcqOption(selectedWord);
@@ -218,43 +317,49 @@ export default function App() {
         setCurrentIndex(nextIndex);
         generateMcqOptions(queue[nextIndex], allWords);
       } else {
-        // Fin de la queue du quiz
-        // On met à jour failedInPhase si la dernière réponse était incorrecte
-        const updatedFailed = isCorrect ? failedInPhase : 
-          (failedInPhase.some(w => w.id === currentWord.id) ? failedInPhase : [...failedInPhase, currentWord]);
-        
-        if (updatedFailed.length > 0) {
+        // End of quiz queue — compute final failed list
+        const finalFailed = isCorrect
+          ? failedInPhase
+          : (failedInPhase.some(w => w.id === currentWord.id) ? failedInPhase : [...failedInPhase, currentWord]);
+
+        if (finalFailed.length > 0) {
+          // Make sure failedInPhase is up-to-date for the review screen
+          if (!isCorrect && !failedInPhase.some(w => w.id === currentWord.id)) {
+            setFailedInPhase(finalFailed);
+          }
           setAppPhase('quiz_review_check');
         } else {
           setAppPhase('transition_to_writing');
         }
       }
-    }, 1000); 
-  };
+    }, 1000);
+  }, [feedback, queue, currentIndex, failedInPhase, allWords]);
 
-  // --- Logique Écriture ---
-
+  // ---- Writing ----
   const insertCharacter = (char) => {
     setInputValue(prev => prev + char);
     inputRef.current?.focus();
   };
 
-  const proceedToNextWritingStep = () => {
+  // Core function to advance to the next writing step
+  // Accepts an optional overrideFailed to avoid stale state issues
+  const proceedToNextWritingStep = useCallback((overrideFailed = null) => {
     setShowOverrideButton(false);
-    
-    // Nettoyer le timeout si il existe
+
     if (correctTimeoutRef.current) {
       clearTimeout(correctTimeoutRef.current);
       correctTimeoutRef.current = null;
     }
+
+    const currentFailed = overrideFailed !== null ? overrideFailed : failedInPhase;
 
     if (currentIndex < queue.length - 1) {
       setCurrentIndex(prev => prev + 1);
       setFeedback(null);
       setInputValue('');
     } else {
-      // Fin de la queue d'écriture
-      if (failedInPhase.length > 0) {
+      // End of writing queue
+      if (currentFailed.length > 0) {
         setAppPhase('writing_review_check');
       } else {
         const hasMoreWords = batchOffset + BATCH_SIZE < allWords.length;
@@ -265,25 +370,25 @@ export default function App() {
         }
       }
     }
-  };
+  }, [currentIndex, queue.length, failedInPhase, batchOffset, allWords.length]);
 
-  const handleOverrideCorrect = () => {
+  // FIX: handleOverrideCorrect now computes the new failedInPhase and passes it directly
+  const handleOverrideCorrect = useCallback(() => {
     const currentWord = queue[currentIndex];
-    setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id));
-    proceedToNextWritingStep();
-  };
+    const newFailed = failedInPhase.filter(w => w.id !== currentWord.id);
+    setFailedInPhase(newFailed);
+    proceedToNextWritingStep(newFailed);
+  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep]);
 
   const handleWritingSubmit = (e) => {
     e.preventDefault();
-    
-    // Si on a déjà un feedback (incorrect OU correct) et qu'on appuie sur Entrée, on continue
+
     if (feedback === 'incorrect') {
       proceedToNextWritingStep();
       return;
     }
-    
+
     if (feedback === 'correct') {
-      // Clear le timeout et passer immédiatement au suivant
       if (correctTimeoutRef.current) {
         clearTimeout(correctTimeoutRef.current);
         correctTimeoutRef.current = null;
@@ -291,9 +396,8 @@ export default function App() {
       proceedToNextWritingStep();
       return;
     }
-    
-    const currentWord = queue[currentIndex];
 
+    const currentWord = queue[currentIndex];
     const isCorrect = checkAnswer(inputValue, currentWord.def);
 
     setFeedback(isCorrect ? 'correct' : 'incorrect');
@@ -304,52 +408,78 @@ export default function App() {
       }
       setShowOverrideButton(true);
     } else {
-      setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id)); 
+      // If previously failed and now correct in review, remove from failed
+      setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id));
       setShowOverrideButton(false);
-      correctTimeoutRef.current = setTimeout(proceedToNextWritingStep, 1500); 
+      correctTimeoutRef.current = setTimeout(() => proceedToNextWritingStep(), 1500);
     }
   };
 
-  // useEffect pour mettre le focus automatiquement sur le champ de texte en phase d'écriture
+  // ---- Import Handlers ----
+  const handlePdfUpload = async (file) => {
+    if (!file || file.type !== 'application/pdf') return;
+    setPdfLoading(true);
+    try {
+      const words = await parseQuizletPdf(file);
+      setImportPreview(words);
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      setImportPreview([]);
+    }
+    setPdfLoading(false);
+  };
+
+  const handleTextImport = () => {
+    const words = parseQuizletText(importText);
+    setImportPreview(words);
+  };
+
+  const confirmImport = () => {
+    if (importPreview.length > 0) {
+      setAllWords(importPreview.map((w, i) => ({ ...w, id: i })));
+      setShowImportModal(false);
+      setImportPreview([]);
+      setImportText('');
+    }
+  };
+
+  // ---- Shuffle on setup ----
+  const handleShuffle = () => {
+    setAllWords(prev => shuffleArray(prev));
+  };
+
+  // ---- Effects ----
+
+  // Auto-focus input in writing phase
   useEffect(() => {
     if (appPhase === 'writing' && inputRef.current) {
-      // Petit délai pour s'assurer que le DOM est prêt
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [appPhase, currentIndex]); // Se déclenche quand on change de phase ou de question
+  }, [appPhase, currentIndex]);
 
-  // useEffect pour gérer la touche Entrée globalement quand on a un feedback
+  // Global Enter key for writing feedback
   useEffect(() => {
     if (appPhase !== 'writing' || feedback === null) return;
-    
+
     const handleKeyPress = (e) => {
-      // Si on appuie sur Entrée et qu'on a un feedback (correct ou incorrect)
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (feedback === 'correct') {
-          // Clear le timeout et passer immédiatement
-          if (correctTimeoutRef.current) {
-            clearTimeout(correctTimeoutRef.current);
-            correctTimeoutRef.current = null;
-          }
-        }
-        // Dans tous les cas (correct ou incorrect), on passe au suivant
-        setShowOverrideButton(false);
-        
         if (correctTimeoutRef.current) {
           clearTimeout(correctTimeoutRef.current);
           correctTimeoutRef.current = null;
         }
 
+        // FIX: compute actual failed state for override scenario
+        const currentWord = queue[currentIndex];
+        const actualFailed = failedInPhase;
+
         if (currentIndex < queue.length - 1) {
           setCurrentIndex(prev => prev + 1);
           setFeedback(null);
           setInputValue('');
+          setShowOverrideButton(false);
         } else {
-          // Fin de la queue d'écriture
-          if (failedInPhase.length > 0) {
+          if (actualFailed.length > 0) {
             setAppPhase('writing_review_check');
           } else {
             const hasMoreWords = batchOffset + BATCH_SIZE < allWords.length;
@@ -365,48 +495,32 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase.length, batchOffset, allWords.length]); // Toutes les dépendances nécessaires
+  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase, batchOffset, allWords.length, queue]);
 
-  // useEffect pour gérer la touche Entrée sur les écrans de transition/choix
+  // Global Enter on transition screens
   useEffect(() => {
+    const transitionPhases = ['quiz_review_check', 'transition_to_writing', 'writing_review_check', 'batch_complete'];
+    if (!transitionPhases.includes(appPhase)) return;
+
     const handleKeyPress = (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        
-        // Quiz Review Check - Revoir les erreurs
-        if (appPhase === 'quiz_review_check') {
-          handleStartReview();
-        }
-        // Transition vers l'écriture
-        else if (appPhase === 'transition_to_writing') {
-          handleProceedToWritingPhase();
-        }
-        // Writing Review Check - Corriger les fautes
-        else if (appPhase === 'writing_review_check') {
-          handleStartReview();
-        }
-        // Batch Complete - Série suivante
-        else if (appPhase === 'batch_complete') {
-          handleNextBatch();
-        }
+        if (appPhase === 'quiz_review_check') handleStartReview();
+        else if (appPhase === 'transition_to_writing') handleProceedToWritingPhase();
+        else if (appPhase === 'writing_review_check') handleStartReview();
+        else if (appPhase === 'batch_complete') handleNextBatch();
       }
     };
 
-    // Ne s'active que sur les phases de transition
-    const transitionPhases = ['quiz_review_check', 'transition_to_writing', 'writing_review_check', 'batch_complete'];
-    if (transitionPhases.includes(appPhase)) {
-      window.addEventListener('keydown', handleKeyPress);
-      return () => window.removeEventListener('keydown', handleKeyPress);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appPhase]); // Les fonctions handler sont stables et n'ont pas besoin d'être dans les dépendances
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [appPhase, handleStartReview]);
 
-  // useEffect pour gérer la sélection des réponses QCM avec les touches 1-4
+  // Keyboard 1-4 for MCQ
   useEffect(() => {
-    if (appPhase !== 'quiz' || feedback !== null) return; // Ne fonctionne que pendant le quiz et sans feedback actif
-    
+    if (appPhase !== 'quiz' || feedback !== null) return;
+
     const handleKeyPress = (e) => {
-      // Touches 1, 2, 3, 4 pour sélectionner les réponses
       const key = e.key;
       if (['1', '2', '3', '4'].includes(key)) {
         e.preventDefault();
@@ -419,429 +533,654 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appPhase, feedback, mcqOptions]); // Se déclenche quand ces valeurs changent
+  }, [appPhase, feedback, mcqOptions, handleMcqAnswer]);
 
-  // --- Composants d'Affichage ---
+  // ---- Derived ----
+  const accentChars = ACCENT_PRESETS[selectedLanguage]?.chars || [];
+  const currentBatchNum = Math.floor(batchOffset / BATCH_SIZE) + 1;
+  const totalBatches = Math.ceil(allWords.length / BATCH_SIZE);
 
-  const HeaderInfo = () => {
-    const currentBatchNum = Math.floor(batchOffset / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(allWords.length / BATCH_SIZE);
+  // ============================================================
+  // COMPONENTS
+  // ============================================================
 
+  const HeaderInfo = () => (
+    <div className="flex justify-between items-center text-white/40 text-xs md:text-sm font-semibold uppercase tracking-wider mb-3">
+      <div className="flex items-center gap-2">
+        <Layers className="w-4 h-4" />
+        <span>Batch {currentBatchNum} / {totalBatches}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="bg-white/5 border border-white/10 px-3 py-1 rounded-lg text-white/50">
+          {appPhase.includes('writing') || appPhase === 'transition_to_writing' ? 'Phase 2: Writing' : 'Phase 1: Quiz'}
+        </div>
+        <button onClick={handleReset} className="btn-ghost text-xs" title="Back to home">
+          <ArrowLeft className="w-3.5 h-3.5" /> Home
+        </button>
+      </div>
+    </div>
+  );
+
+  const ProgressBar = ({ current, total, color = "from-indigo-500 to-indigo-400" }) => (
+    <div className="progress-bar">
+      <div
+        className={`progress-bar-fill bg-gradient-to-r ${color}`}
+        style={{ width: `${Math.min((current / total) * 100, 100)}%` }}
+      />
+    </div>
+  );
+
+  const AccentsBar = () => {
+    if (accentChars.length === 0) return null;
     return (
-      <div className="flex justify-between items-center text-slate-400 text-xs md:text-sm font-bold uppercase tracking-wider mb-2">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4" />
-            <span>Série {currentBatchNum} / {totalBatches}</span>
-          </div>
-          <div className="bg-slate-800 px-2 py-1 rounded text-slate-300">
-            {appPhase.includes('writing') || appPhase.includes('transition_to_writing') ? 'Phase 2 : Écriture' : 'Phase 1 : Quiz'}
-          </div>
+      <div className="flex gap-1.5 justify-center mb-4 flex-wrap">
+        {accentChars.map(char => (
+          <button
+            key={char}
+            type="button"
+            onClick={() => insertCharacter(char)}
+            className="accent-btn"
+          >
+            {char}
+          </button>
+        ))}
       </div>
     );
   };
 
-  const AccentsBar = () => (
-    <div className="flex gap-2 justify-center mb-4 flex-wrap">
-      {['á', 'é', 'í', 'ó', 'ú', 'ü', 'ñ', '¡', '¿'].map(char => (
-        <button
-          key={char}
-          type="button"
-          onClick={() => insertCharacter(char)}
-          className="w-10 h-10 bg-slate-100 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 font-medium rounded-lg border border-slate-200 shadow-sm active:scale-95 transition-colors touch-manipulation"
-        >
-          {char}
-        </button>
-      ))}
-    </div>
-  );
+  // ---- Import Modal ----
+  const ImportModal = () => {
+    if (!showImportModal) return null;
 
-  // --- Écrans ---
-
-  // Setup Screen
-  if (appPhase === 'setup') {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center font-sans">
-        <Card className="w-full max-w-2xl">
-          <div className="p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="bg-indigo-100 p-3 rounded-xl">
-                <Book className="w-8 h-8 text-indigo-600" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+        <div className="glass-card-elevated w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-slide-up">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                <Upload className="w-5 h-5 text-indigo-400" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-slate-800">VocabMaster</h1>
-                <p className="text-slate-500">Méthode par séries de {BATCH_SIZE} mots</p>
+                <h3 className="text-lg font-bold text-white">Import Vocabulary</h3>
+                <p className="text-sm text-white/40">From Quizlet or any source</p>
+              </div>
+            </div>
+            <button onClick={() => setShowImportModal(false)} className="btn-ghost">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-white/10">
+            <button
+              onClick={() => setImportTab('text')}
+              className={`flex-1 py-3 text-sm font-semibold transition-all flex items-center justify-center gap-2
+                ${importTab === 'text' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-indigo-500/5' : 'text-white/40 hover:text-white/60'}`}
+            >
+              <FileText className="w-4 h-4" /> Paste Text
+            </button>
+            <button
+              onClick={() => setImportTab('pdf')}
+              className={`flex-1 py-3 text-sm font-semibold transition-all flex items-center justify-center gap-2
+                ${importTab === 'pdf' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-indigo-500/5' : 'text-white/40 hover:text-white/60'}`}
+            >
+              <Upload className="w-4 h-4" /> Upload PDF
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="p-6 flex-1 overflow-y-auto">
+            {importTab === 'text' ? (
+              <div className="space-y-4">
+                <p className="text-white/50 text-sm">
+                  Paste your Quizlet export (use <span className="kbd">Tab</span> delimiter) or <code className="kbd">term - definition</code> format:
+                </p>
+                <textarea
+                  className="w-full h-40 p-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/30 
+                             font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none"
+                  placeholder={"hello\thola\ngoodbye\tadiós\nthank you\tgracias"}
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                />
+                <button onClick={handleTextImport} className="btn-primary w-full">
+                  <FileText className="w-4 h-4" /> Parse Text
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-white/50 text-sm">
+                  Upload a Quizlet PDF (use Print → Save as PDF from Quizlet):
+                </p>
+                <div
+                  className={`drop-zone rounded-xl p-10 text-center cursor-pointer transition-all
+                    ${isDragging ? 'drag-over' : ''}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const file = e.dataTransfer.files[0];
+                    handlePdfUpload(file);
+                  }}
+                >
+                  <Upload className="w-10 h-10 text-indigo-400/50 mx-auto mb-3" />
+                  <p className="text-white/60 font-medium">Drop PDF here or click to browse</p>
+                  <p className="text-white/30 text-sm mt-1">Supports Quizlet exported PDFs</p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => handlePdfUpload(e.target.files[0])}
+                />
+                {pdfLoading && (
+                  <div className="text-center py-4">
+                    <RefreshCw className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" />
+                    <p className="text-white/50 text-sm">Parsing PDF...</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Preview */}
+            {importPreview.length > 0 && (
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-white/70 font-semibold text-sm uppercase tracking-wider">
+                    Preview ({importPreview.length} words)
+                  </h4>
+                  <button onClick={confirmImport} className="btn-success text-sm py-2 px-4">
+                    <Check className="w-4 h-4" /> Confirm Import
+                  </button>
+                </div>
+                <div className="bg-white/5 rounded-xl border border-white/10 max-h-48 overflow-y-auto">
+                  {importPreview.slice(0, 20).map((w, i) => (
+                    <div key={i} className="flex items-center py-2 px-4 border-b border-white/5 last:border-0">
+                      <span className="text-white/30 text-xs w-6">{i + 1}</span>
+                      <span className="text-white/80 flex-1">{w.term}</span>
+                      <span className="text-indigo-400/70 flex-1 text-right">{w.def}</span>
+                    </div>
+                  ))}
+                  {importPreview.length > 20 && (
+                    <div className="text-center py-2 text-white/30 text-sm">
+                      ... and {importPreview.length - 20} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================
+  // SCREENS
+  // ============================================================
+
+  // --- SETUP ---
+  if (appPhase === 'setup') {
+    return (
+      <div className="gradient-bg flex items-center justify-center p-4">
+        <ImportModal />
+        <div className="w-full max-w-2xl animate-fade-in">
+          <div className="glass-card-elevated overflow-hidden">
+            {/* Hero Header */}
+            <div className="p-8 pb-0">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                  <Book className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-3xl font-black text-white tracking-tight">VocabMaster</h1>
+                  <p className="text-white/40 text-sm">Learn any language, {BATCH_SIZE} words at a time</p>
+                </div>
+              </div>
+
+              {/* Info Banner */}
+              <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl mb-6 flex gap-3">
+                <Layers className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
+                <p className="text-indigo-200/80 text-sm">
+                  This session has <strong className="text-indigo-300">{allWords.length} words</strong>.
+                  The program creates <strong className="text-indigo-300">{Math.ceil(allWords.length / BATCH_SIZE)} batches</strong> in
+                  random order. Edit the list below or import from Quizlet.
+                </p>
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl mb-6 text-blue-800 text-sm flex gap-3">
-              <Layers className="w-5 h-5 flex-shrink-0" />
-              <p>
-                Cette session contient <strong>{allWords.length} mots</strong>.
-                Le programme va créer <strong>{Math.ceil(allWords.length / BATCH_SIZE)} séries</strong> de 10 mots <strong>dans un ordre aléatoire</strong>.
-                Vous pouvez modifier la liste ci-dessous (format: *français - espagnol*).
-              </p>
+            {/* Settings Row */}
+            <div className="px-8 pb-4 flex flex-wrap gap-3 items-center">
+              {/* Language Selector */}
+              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                <Globe className="w-4 h-4 text-white/40" />
+                <select
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  className="bg-transparent text-white/80 text-sm outline-none cursor-pointer"
+                >
+                  {Object.entries(ACCENT_PRESETS).map(([key, val]) => (
+                    <option key={key} value={key} className="bg-slate-800">{val.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Import Button */}
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white/60 
+                           hover:bg-indigo-500/10 hover:border-indigo-500/30 hover:text-indigo-300 transition-all text-sm"
+              >
+                <Upload className="w-4 h-4" /> Import
+              </button>
+
+              {/* Shuffle Button */}
+              <button
+                onClick={handleShuffle}
+                disabled={allWords.length === 0}
+                className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white/60 
+                           hover:bg-purple-500/10 hover:border-purple-500/30 hover:text-purple-300 transition-all text-sm
+                           disabled:opacity-30 disabled:cursor-not-allowed active:scale-95"
+                title="Shuffle word order"
+              >
+                <Shuffle className="w-4 h-4" /> Shuffle
+              </button>
             </div>
 
-            <textarea
-              className="w-full h-48 p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-sm mb-6 bg-slate-50"
-              value={allWords.map(w => `${w.term} - ${w.def}`).join('\n')}
-              onChange={(e) => {
-                const lines = e.target.value.split('\n');
-                const newWords = lines
-                  .filter(line => line.includes('-'))
-                  .map((line, idx) => {
-                    const parts = line.split('-');
-                    const term = parts[0].trim();
-                    const def = parts.slice(1).join('-').trim();
-                    return { id: idx, term, def };
-                  })
-                  .filter(w => w.term && w.def);
-                setAllWords(newWords);
-              }}
-            />
+            {/* Word List Editor */}
+            <div className="px-8 pb-4">
+              <textarea
+                className="w-full h-52 p-4 bg-white/5 border border-white/10 rounded-xl text-white/80 placeholder-white/25 
+                           font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-none"
+                placeholder={"hello - hola\ngoodbye - adiós\nthank you - gracias / merci"}
+                value={allWords.map(w => `${w.term} - ${w.def}`).join('\n')}
+                onChange={(e) => {
+                  const lines = e.target.value.split('\n');
+                  const newWords = lines
+                    .filter(line => line.includes('-'))
+                    .map((line, idx) => {
+                      const parts = line.split('-');
+                      const term = parts[0].trim();
+                      const def = parts.slice(1).join('-').trim();
+                      return { id: idx, term, def };
+                    })
+                    .filter(w => w.term && w.def);
+                  setAllWords(newWords);
+                }}
+              />
+            </div>
 
-            <Button onClick={() => handleStartFullSession(allWords)} className="w-full" disabled={allWords.length === 0}>
-              Commencer l'apprentissage ({allWords.length} mots)
-            </Button>
+            {/* Start Button */}
+            <div className="px-8 pb-8">
+              <button
+                onClick={() => handleStartFullSession(allWords)}
+                disabled={allWords.length === 0}
+                className="btn-primary w-full text-lg py-4"
+              >
+                Start Learning ({allWords.length} words)
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-        </Card>
+        </div>
       </div>
     );
   }
 
-  // Quiz Review Check
+  // --- QUIZ REVIEW CHECK ---
   if (appPhase === 'quiz_review_check') {
-      return (
-         <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
-         <Card className="w-full max-w-md p-8 text-center">
-             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                 <RefreshCw className="w-8 h-8 text-amber-600" />
-             </div>
-             <h2 className="text-2xl font-bold text-slate-800 mb-2">Attention !</h2>
-             <p className="text-slate-500 mb-8">
-                 Vous avez raté <strong>{failedInPhase.length} mots</strong> dans cette série.
-                 Vous devez les maîtriser au Quiz avant de passer à l'étape d'écriture.
-             </p>
-             <div className="bg-amber-50 rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left">
-                 {failedInPhase.map(w => (
-                     <div key={w.id} className="text-sm py-1 border-b border-amber-100 last:border-0 text-amber-800">
-                         • {w.term} ({w.def})
-                     </div>
-                 ))}
-             </div>
-             <Button onClick={handleStartReview} className="w-full bg-amber-500 hover:bg-amber-600 text-white">
-                 Revoir mes erreurs immédiatement
-             </Button>
-             <p className="text-slate-400 text-xs text-center mt-3">Appuyez sur <kbd className="px-2 py-1 bg-slate-200 rounded text-slate-600">Entrée</kbd> pour continuer</p>
-         </Card>
-         </div>
-       )
-   }
+    return (
+      <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <div className="glass-card-elevated w-full max-w-md p-8 text-center animate-slide-up">
+          <div className="w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <RefreshCw className="w-8 h-8 text-amber-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Mistakes Found</h2>
+          <p className="text-white/50 mb-6">
+            You missed <strong className="text-amber-400">{failedInPhase.length} word{failedInPhase.length > 1 ? 's' : ''}</strong>.
+            Master them in the quiz before moving to writing.
+          </p>
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left">
+            {failedInPhase.map(w => (
+              <div key={w.id} className="text-sm py-1.5 border-b border-amber-500/10 last:border-0 text-amber-300/80">
+                • {w.term} → <span className="text-amber-200/60">{w.def}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={handleStartReview} className="btn-warning w-full">
+            <RefreshCw className="w-4 h-4" /> Review Mistakes Now
+          </button>
+          <p className="text-white/25 text-xs text-center mt-3">
+            Press <kbd className="kbd">Enter</kbd> to continue
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-  // Quiz Screen
+  // --- QUIZ ---
   if (appPhase === 'quiz') {
     const currentWord = queue[currentIndex];
-    
+
     if (!currentWord) {
-      // Si on arrive ici, c'est qu'il y a un problème - on retourne à la transition
-      console.error("Mot actuel non trouvé dans le quiz");
       return (
-        <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
-          <Card className="p-8 text-center">
-            <p className="text-slate-600 mb-4">Une erreur s'est produite...</p>
-            <Button onClick={handleReset}>Retour à l'accueil</Button>
-          </Card>
+        <div className="gradient-bg flex items-center justify-center p-4">
+          <div className="glass-card p-8 text-center">
+            <p className="text-white/60 mb-4">An error occurred...</p>
+            <button onClick={handleReset} className="btn-primary">Back to Home</button>
+          </div>
         </div>
       );
     }
 
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 font-sans">
-        <div className="w-full max-w-2xl space-y-6">
+      <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-2xl space-y-4 animate-fade-in">
           <HeaderInfo />
-          <ProgressBar current={currentIndex + 1} total={queue.length} color="bg-indigo-500" />
+          <ProgressBar current={currentIndex + 1} total={queue.length} color="from-indigo-500 to-purple-500" />
 
-          <Card className="min-h-[350px] flex flex-col items-center justify-center p-8 relative">
-              {queue.length < BATCH_SIZE && (
-                  <div className="absolute top-4 right-4 bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3" /> Rattrapage
-                  </div>
-              )}
-
-              <span className="text-slate-400 text-sm uppercase tracking-wider font-bold mb-4">Trouvez la traduction</span>
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-800 text-center mb-8">{currentWord.term}</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                {mcqOptions.map((option, index) => {
-                  let statusClass = "hover:border-indigo-500 hover:bg-slate-50";
-                  const isSelected = selectedMcqOption && selectedMcqOption.id === option.id;
-
-                  if (feedback !== null) {
-                    if (option.id === currentWord.id) {
-                      statusClass = "bg-emerald-100 border-emerald-500 text-emerald-800 ring-2 ring-emerald-500";
-                    } else if (isSelected) {
-                      statusClass = "bg-rose-100 border-rose-500 text-rose-800 ring-2 ring-rose-500";
-                    } else {
-                      statusClass += " opacity-60";
-                    }
-                  }
-                  
-                  return (
-                    <button
-                      key={option.id}
-                      disabled={feedback !== null}
-                      onClick={() => handleMcqAnswer(option)}
-                      className={`p-4 rounded-xl border-2 border-slate-100 text-left font-medium transition-all duration-200 text-slate-700 relative ${statusClass}`}
-                    >
-                      <span className="absolute top-2 left-2 w-6 h-6 bg-slate-200 text-slate-600 rounded-md flex items-center justify-center text-xs font-bold">
-                        {index + 1}
-                      </span>
-                      <div className="pl-6">{option.def}</div>
-                    </button>
-                  );
-                })}
+          <div className="glass-card-elevated min-h-[380px] flex flex-col items-center justify-center p-8 relative">
+            {queue.length < BATCH_SIZE && (
+              <div className="absolute top-4 right-4 bg-amber-500/15 text-amber-400 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border border-amber-500/20">
+                <RefreshCw className="w-3 h-3" /> Review
               </div>
-              
-              {feedback === null && (
-                <p className="text-slate-400 text-xs text-center mt-4">
-                  Utilisez les touches <kbd className="px-2 py-1 bg-slate-700 text-slate-300 rounded mx-1">1</kbd> 
-                  <kbd className="px-2 py-1 bg-slate-700 text-slate-300 rounded mx-1">2</kbd> 
-                  <kbd className="px-2 py-1 bg-slate-700 text-slate-300 rounded mx-1">3</kbd> 
-                  <kbd className="px-2 py-1 bg-slate-700 text-slate-300 rounded mx-1">4</kbd> 
-                  ou cliquez pour répondre
-                </p>
-              )}
-          </Card>
+            )}
+
+            <span className="text-white/30 text-xs uppercase tracking-[0.2em] font-bold mb-4">Find the translation</span>
+            <h2 className="text-3xl md:text-4xl font-black text-white text-center mb-10">{currentWord.term}</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
+              {mcqOptions.map((option, index) => {
+                let statusClass = "bg-white/5 border-white/10 hover:bg-indigo-500/10 hover:border-indigo-500/30 text-white/80";
+                const isSelected = selectedMcqOption && selectedMcqOption.id === option.id;
+
+                if (feedback !== null) {
+                  if (option.id === currentWord.id) {
+                    statusClass = "bg-emerald-500/15 border-emerald-500/50 text-emerald-300 ring-1 ring-emerald-500/30";
+                  } else if (isSelected) {
+                    statusClass = "bg-rose-500/15 border-rose-500/50 text-rose-300 ring-1 ring-rose-500/30 animate-shake";
+                  } else {
+                    statusClass = "bg-white/[0.02] border-white/5 text-white/20";
+                  }
+                }
+
+                return (
+                  <button
+                    key={option.id}
+                    disabled={feedback !== null}
+                    onClick={() => handleMcqAnswer(option)}
+                    className={`quiz-option p-4 rounded-xl border-2 text-left font-medium transition-all duration-200 relative ${statusClass}`}
+                  >
+                    <span className="absolute top-2 left-2 w-6 h-6 bg-white/10 text-white/40 rounded-md flex items-center justify-center text-xs font-bold">
+                      {index + 1}
+                    </span>
+                    <div className="pl-7">{option.def}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {feedback === null && (
+              <p className="text-white/20 text-xs text-center mt-6">
+                Use keys <kbd className="kbd mx-0.5">1</kbd>
+                <kbd className="kbd mx-0.5">2</kbd>
+                <kbd className="kbd mx-0.5">3</kbd>
+                <kbd className="kbd mx-0.5">4</kbd>
+                or click to answer
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  // Transition Screen (Quiz -> Writing)
+  // --- TRANSITION (Quiz → Writing) ---
   if (appPhase === 'transition_to_writing') {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 font-sans text-center">
-        <Card className="p-12 max-w-lg w-full">
-            <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Edit3 className="w-8 h-8 text-indigo-600" />
-            </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">Quiz Validé !</h2>
-            <p className="text-slate-500 mb-8">
-              Vous connaissez ces {BATCH_SIZE} mots. Passons maintenant à l'écriture pour consolider cette série.
-            </p>
-            <Button onClick={handleProceedToWritingPhase} className="w-full">
-                Commencer l'Écriture
-                <ChevronRight className="w-4 h-4" />
-            </Button>
-            <p className="text-slate-400 text-xs text-center mt-3">Appuyez sur <kbd className="px-2 py-1 bg-slate-200 rounded text-slate-600">Entrée</kbd> pour continuer</p>
-        </Card>
+      <div className="gradient-bg flex flex-col items-center justify-center p-4 text-center">
+        <div className="glass-card-elevated p-12 max-w-lg w-full animate-bounce-in">
+          <div className="w-16 h-16 bg-indigo-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Edit3 className="w-8 h-8 text-indigo-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Quiz Passed! ✨</h2>
+          <p className="text-white/50 mb-8">
+            You know these {queue.length} words. Now let's write them to solidify your memory.
+          </p>
+          <button onClick={handleProceedToWritingPhase} className="btn-primary w-full">
+            Start Writing <ChevronRight className="w-4 h-4" />
+          </button>
+          <p className="text-white/25 text-xs text-center mt-3">
+            Press <kbd className="kbd">Enter</kbd> to continue
+          </p>
+        </div>
       </div>
-    )
+    );
   }
 
-  // Writing Review Check
+  // --- WRITING REVIEW CHECK ---
   if (appPhase === 'writing_review_check') {
-      return (
-         <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 font-sans">
-         <Card className="w-full max-w-md p-8 text-center">
-             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                 <Edit3 className="w-8 h-8 text-amber-600" />
-             </div>
-             <h2 className="text-2xl font-bold text-slate-800 mb-2">Quelques fautes...</h2>
-             <p className="text-slate-500 mb-8">
-                 Il reste <strong>{failedInPhase.length} mots</strong> à corriger pour valider cette série.
-             </p>
-             <div className="bg-amber-50 rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left">
-                {failedInPhase.map(w => (
-                     <div key={w.id} className="text-sm py-1 border-b border-amber-100 last:border-0 text-amber-800">
-                         • {w.term}
-                     </div>
-                 ))}
-             </div>
-             <Button onClick={handleStartReview} className="w-full bg-amber-500 hover:bg-amber-600 text-white">
-                 Corriger mes fautes
-             </Button>
-             <p className="text-slate-400 text-xs text-center mt-3">Appuyez sur <kbd className="px-2 py-1 bg-slate-200 rounded text-slate-600">Entrée</kbd> pour continuer</p>
-         </Card>
-         </div>
-       )
+    return (
+      <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <div className="glass-card-elevated w-full max-w-md p-8 text-center animate-slide-up">
+          <div className="w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Edit3 className="w-8 h-8 text-amber-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Some Mistakes...</h2>
+          <p className="text-white/50 mb-6">
+            <strong className="text-amber-400">{failedInPhase.length} word{failedInPhase.length > 1 ? 's' : ''}</strong> left to correct before completing this batch.
+          </p>
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left">
+            {failedInPhase.map(w => (
+              <div key={w.id} className="text-sm py-1.5 border-b border-amber-500/10 last:border-0 text-amber-300/80">
+                • {w.term}
+              </div>
+            ))}
+          </div>
+          <button onClick={handleStartReview} className="btn-warning w-full">
+            <Edit3 className="w-4 h-4" /> Fix Mistakes
+          </button>
+          <p className="text-white/25 text-xs text-center mt-3">
+            Press <kbd className="kbd">Enter</kbd> to continue
+          </p>
+        </div>
+      </div>
+    );
   }
 
-  // Writing Screen
+  // --- WRITING ---
   if (appPhase === 'writing') {
     const currentWord = queue[currentIndex];
 
     if (!currentWord) {
-      console.error("Mot actuel non trouvé dans l'écriture");
       return (
-        <div className="min-h-screen bg-slate-50 p-4 flex items-center justify-center">
-          <Card className="p-8 text-center">
-            <p className="text-slate-600 mb-4">Une erreur s'est produite...</p>
-            <Button onClick={handleReset}>Retour à l'accueil</Button>
-          </Card>
+        <div className="gradient-bg flex items-center justify-center p-4">
+          <div className="glass-card p-8 text-center">
+            <p className="text-white/60 mb-4">An error occurred...</p>
+            <button onClick={handleReset} className="btn-primary">Back to Home</button>
+          </div>
         </div>
       );
     }
-    
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 font-sans">
-        <div className="w-full max-w-xl space-y-6">
-          <HeaderInfo />
-          <ProgressBar current={currentIndex + 1} total={queue.length} color="bg-emerald-500" />
 
-          <Card className="p-8 relative">
-              {queue.length < BATCH_SIZE && (
-                  <div className="absolute top-4 right-4 bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3" /> Correction
-                  </div>
-              )}
-            
-            <span className="text-slate-400 text-sm uppercase tracking-wider font-bold mb-2 block text-center">Traduisez ce terme</span>
-            <h2 className="text-3xl font-bold text-slate-800 text-center mb-6">{currentWord.term}</h2>
+    return (
+      <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-xl space-y-4 animate-fade-in">
+          <HeaderInfo />
+          <ProgressBar current={currentIndex + 1} total={queue.length} color="from-emerald-500 to-teal-400" />
+
+          <div className="glass-card-elevated p-8 relative">
+            {queue.length < BATCH_SIZE && (
+              <div className="absolute top-4 right-4 bg-amber-500/15 text-amber-400 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border border-amber-500/20">
+                <RefreshCw className="w-3 h-3" /> Correction
+              </div>
+            )}
+
+            <span className="text-white/30 text-xs uppercase tracking-[0.2em] font-bold mb-2 block text-center">Translate this term</span>
+            <h2 className="text-3xl font-black text-white text-center mb-6">{currentWord.term}</h2>
 
             <form onSubmit={handleWritingSubmit} className="space-y-4">
               <AccentsBar />
-              
+
               <div className="relative">
-                  <input
-                    ref={inputRef}
-                    autoFocus
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => {
-                        setInputValue(e.target.value);
-                        if (feedback !== null && feedback !== 'correct') {
-                            setFeedback(null);
-                        }
-                    }}
-                    disabled={feedback === 'correct'}
-                    placeholder="Écrivez en espagnol..."
-                    className={`w-full p-4 text-center text-xl rounded-xl border-2 outline-none transition-all shadow-inner
-                      ${feedback === null ? 'border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10' : ''}
-                      ${feedback === 'correct' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : ''}
-                      ${feedback === 'incorrect' ? 'border-rose-500 bg-rose-50 text-rose-700' : ''}
-                    `}
-                  />
-                  {feedback !== 'correct' && (
-                      <Keyboard className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 w-5 h-5 pointer-events-none" />
-                  )}
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => {
+                    setInputValue(e.target.value);
+                    if (feedback !== null && feedback !== 'correct') {
+                      setFeedback(null);
+                      setShowOverrideButton(false);
+                    }
+                  }}
+                  disabled={feedback === 'correct'}
+                  placeholder="Type the translation..."
+                  className={`input-field
+                    ${feedback === 'correct' ? 'input-correct' : ''}
+                    ${feedback === 'incorrect' ? 'input-incorrect' : ''}
+                  `}
+                />
+                {feedback !== 'correct' && (
+                  <Keyboard className="absolute right-4 top-1/2 -translate-y-1/2 text-white/15 w-5 h-5 pointer-events-none" />
+                )}
               </div>
-              
+
               {feedback === 'incorrect' && (
-                 <div className="bg-rose-100 p-4 rounded-xl text-rose-800 text-center animate-in fade-in slide-in-from-top-2 border border-rose-200">
-                    <p className="text-xs font-bold uppercase mb-1 tracking-wide opacity-75">La bonne réponse était :</p>
-                    <p className="text-xl font-bold">{currentWord.def}</p>
-                    <p className="text-xs mt-2 opacity-60">Appuyez sur <kbd className="px-2 py-1 bg-rose-200 rounded">Entrée</kbd> pour continuer</p>
-                 </div>
+                <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center animate-slide-down">
+                  <p className="text-rose-400/60 text-xs font-bold uppercase mb-1 tracking-wide">Correct answer:</p>
+                  <p className="text-xl font-bold text-rose-300">{currentWord.def}</p>
+                  <p className="text-xs mt-2 text-white/25">
+                    Press <kbd className="kbd">Enter</kbd> to continue
+                  </p>
+                </div>
               )}
 
-              <div className="flex gap-4">
-                  {feedback === 'incorrect' && (
-                      <>
-                          {showOverrideButton && (
-                              <Button
-                                  onClick={handleOverrideCorrect}
-                                  type="button"
-                                  variant="outline"
-                                  className="flex-1 border-emerald-500 text-emerald-600 hover:bg-emerald-50"
-                              >
-                                  <Check className='w-4 h-4' /> J'avais raison
-                              </Button>
-                          )}
-
-                          <Button
-                              onClick={proceedToNextWritingStep} 
-                              type="button"
-                              className={`flex-1 ${showOverrideButton ? '' : 'w-full'}`}
-                              variant="secondary"
-                          >
-                              Continuer <ChevronRight className="w-4 h-4" />
-                          </Button>
-                      </>
-                  )}
-
-                  {feedback !== 'incorrect' && (
-                      <Button
-                          disabled={feedback === 'correct' || inputValue.trim() === ''}
-                          className="w-full"
-                          variant={feedback === 'correct' ? 'success' : 'primary'}
-                          type="submit"
+              <div className="flex gap-3">
+                {feedback === 'incorrect' && (
+                  <>
+                    {showOverrideButton && (
+                      <button
+                        onClick={handleOverrideCorrect}
+                        type="button"
+                        className="btn-outline flex-1"
                       >
-                          {feedback === 'correct' ? (
-                            <>
-                                Correct ! <Check className='w-5 h-5' />
-                            </>
-                          ) : 'Valider'}
-                      </Button>
-                  )}
+                        <Check className='w-4 h-4' /> I was right
+                      </button>
+                    )}
+                    <button
+                      onClick={() => proceedToNextWritingStep()}
+                      type="button"
+                      className={`btn-secondary flex-1 ${showOverrideButton ? '' : 'w-full'}`}
+                    >
+                      Continue <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+
+                {feedback !== 'incorrect' && (
+                  <button
+                    disabled={feedback === 'correct' || inputValue.trim() === ''}
+                    className={`w-full ${feedback === 'correct' ? 'btn-success' : 'btn-primary'}`}
+                    type="submit"
+                  >
+                    {feedback === 'correct' ? (
+                      <><Check className='w-5 h-5' /> Correct!</>
+                    ) : 'Submit'}
+                  </button>
+                )}
               </div>
             </form>
-          </Card>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Batch Complete Screen (Next Batch)
+  // --- BATCH COMPLETE ---
   if (appPhase === 'batch_complete') {
     const nextBatchStart = batchOffset + BATCH_SIZE + 1;
     const nextBatchEnd = Math.min(nextBatchStart + BATCH_SIZE - 1, allWords.length);
 
     return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 font-sans text-center">
-        <Card className="p-12 max-w-lg w-full">
-            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Check className="w-8 h-8 text-emerald-600" />
-            </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">Série Terminée !</h2>
-            <p className="text-slate-500 mb-8">
-              Vous avez validé cette partie. Prêt pour la série <strong>{Math.floor(batchOffset / BATCH_SIZE) + 2}</strong>, avec les mots <strong>{nextBatchStart} à {nextBatchEnd}</strong> ?
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4">
-                <Button variant="secondary" onClick={handleReset} className="flex-1">
-                    Arrêter ici
-                </Button>
-                <Button onClick={handleNextBatch} className="flex-1">
-                    Série Suivante
-                    <ChevronRight className="w-4 h-4" />
-                </Button>
-            </div>
-            <p className="text-slate-400 text-xs text-center mt-3">Appuyez sur <kbd className="px-2 py-1 bg-slate-200 rounded text-slate-600">Entrée</kbd> pour la série suivante</p>
-        </Card>
+      <div className="gradient-bg flex flex-col items-center justify-center p-4 text-center">
+        <div className="glass-card-elevated p-12 max-w-lg w-full animate-bounce-in">
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <Check className="w-8 h-8 text-emerald-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Batch Complete! 🎉</h2>
+          <p className="text-white/50 mb-8">
+            Ready for batch <strong className="text-indigo-300">{Math.floor(batchOffset / BATCH_SIZE) + 2}</strong>?
+            Words <strong className="text-indigo-300">{nextBatchStart} to {nextBatchEnd}</strong>.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button onClick={handleReset} className="btn-secondary flex-1">
+              Stop Here
+            </button>
+            <button onClick={handleNextBatch} className="btn-primary flex-1">
+              Next Batch <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-white/25 text-xs text-center mt-3">
+            Press <kbd className="kbd">Enter</kbd> for next batch
+          </p>
         </div>
-    )
+      </div>
+    );
   }
 
-  // Final Victory Screen
+  // --- VICTORY ---
   if (appPhase === 'victory') {
     return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 font-sans">
-              <div className="text-center animate-in zoom-in duration-500">
-                  <div className="w-32 h-32 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-emerald-500/50">
-                      <Trophy className="w-16 h-16 text-white" />
-                  </div>
-                  <h1 className="text-5xl font-bold text-white mb-4">Incroyable !</h1>
-                  <p className="text-indigo-200 text-xl mb-12 max-w-lg mx-auto">
-                      Vous êtes venu à bout des {allWords.length} termes ! Vous avez complété toutes les séries.
-                  </p>
-                  
-                  <div className="flex gap-4 justify-center flex-col sm:flex-row">
-                      <Button onClick={handleReset} className="bg-white text-indigo-600 hover:bg-slate-100">
-                          Retour à l'accueil
-                      </Button>
-                      <Button onClick={() => handleStartFullSession(DEFAULT_WORDS)} variant="outline" className="border-indigo-400 text-indigo-100 hover:bg-indigo-800/50 hover:border-indigo-300">
-                          Tout recommencer
-                      </Button>
-                  </div>
-              </div>
+      <div className="gradient-bg flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Floating particles */}
+        {[...Array(12)].map((_, i) => (
+          <div
+            key={i}
+            className="particle"
+            style={{
+              left: `${10 + Math.random() * 80}%`,
+              top: `${10 + Math.random() * 80}%`,
+              background: ['#818cf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6'][i % 5],
+              animationDelay: `${Math.random() * 3}s`,
+              animationDuration: `${2 + Math.random() * 3}s`,
+            }}
+          />
+        ))}
+
+        <div className="text-center animate-bounce-in relative z-10">
+          <div className="w-32 h-32 bg-gradient-to-br from-emerald-500 to-teal-400 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl trophy-glow">
+            <Trophy className="w-16 h-16 text-white" />
+          </div>
+          <h1 className="text-5xl font-black text-white mb-4">Amazing! 🏆</h1>
+          <p className="text-white/50 text-xl mb-12 max-w-lg mx-auto">
+            You've conquered all <strong className="text-emerald-400">{allWords.length}</strong> words! All batches completed.
+          </p>
+
+          <div className="flex gap-4 justify-center flex-col sm:flex-row">
+            <button onClick={handleReset} className="btn-primary">
+              Back to Home
+            </button>
+            <button
+              onClick={() => handleStartFullSession(allWords)}
+              className="btn-secondary"
+            >
+              <RefreshCw className="w-4 h-4" /> Start Over
+            </button>
+          </div>
         </div>
-    )
+      </div>
+    );
   }
 
+  // Fallback
   return (
-    <div className="p-8 text-center text-slate-500">
-      Chargement...
+    <div className="gradient-bg flex items-center justify-center">
+      <div className="text-white/30">Loading...</div>
     </div>
   );
 }

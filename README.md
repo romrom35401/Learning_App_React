@@ -1,143 +1,124 @@
-# 🎓 LearningApp (vocab-app)
+# 🧠 VocabMaster
 
-**VocabApp** est une application React d'apprentissage de vocabulaire basée sur une méthode scientifique de répétition espacée par séries. Elle est conçue pour maîtriser plus de 100 termes étrangers (français → espagnol, etc.) avec une interface moderne, minimaliste et des raccourcis clavier fluides pour une productivité maximale.
+**A premium vocabulary learning app** with quiz, writing practice, spaced repetition, and Quizlet PDF import. Master any language.
 
----
-
-## 🚀 Fonctionnalités
-
-| Phase                | Objectif                    | Interface                               |
-| :------------------- | :-------------------------- | :-------------------------------------- |
-| **1. Quiz QCM**      | Reconnaissance rapide       | 4 options via clavier (touches 1-4)     |
-| **2. Écriture**      | Production active           | Accents intégrés + feedback immédiat    |
-| **3. Révision auto** | Loop sur erreurs uniquement | Répétition jusqu'à maîtrise 100%        |
-| **4. Séries de 10**  | Progression batchée         | Apprentissage de 100+ mots sans fatigue |
-
-- ✅ **Raccourcis :** `Entrée` pour valider, `1-4` pour les QCM, focus automatique et override intelligent.
-- ✅ **Responsive :** Design mobile-first réalisé avec Tailwind CSS.
-- ✅ **No data saved :** Fonctionne exclusivement côté client (vie privée respectée).
-- ✅ **Shuffle :** Ordre aléatoire généré à chaque nouvelle session.
+![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?logo=tailwindcss&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## 🎮 Comment utiliser
+## ✨ Features
 
-### 1. Installation
+| Feature | Description |
+|:---|:---|
+| **Quiz (MCQ)** | Pick the correct translation — keyboard shortcuts `1`–`4` |
+| **Writing** | Type the answer with instant visual feedback |
+| **Auto-review loop** | Mistakes are isolated and drilled until 100% mastery |
+| **Batches of 10** | Learn 100+ words without fatigue |
+| **PDF Import** | Upload a Quizlet "Print → Save as PDF" file |
+| **Text Import** | Paste tab-separated or `term - definition` text |
+| **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
+| **Shuffle** | Randomize word order at any time |
+| **Keyboard-first** | `Enter` to validate, `1`–`4` for MCQ, auto-focus everywhere |
+| **Dark UI** | Premium glassmorphism design with smooth animations |
+
+---
+
+## 🚀 Getting Started
 
 ```bash
-git clone <votre-repo-url>
-cd learning-app
+# Clone the repository
+git clone https://github.com/<your-username>/vocab-app.git
+cd vocab-app
+
+# Install dependencies
 npm install
-npm run dev  # Disponible sur http://localhost:5173
+
+# Start the dev server
+npm run dev
+# → opens at http://localhost:5173
 ```
 
-```
-```bash
-# Lancer l'application
-npm run dev # Disponible sur http://localhost:5173
-```
+---
 
-### 2. Workflow d'une session
+## 🎮 How It Works
 
 ```
-Configuration → Quiz (10 mots) → Écriture → Révisions → Batch suivant → Victoire !
-      |                              ↑          ↓
-      └------------------------------┴-- si erreurs (Review Loop)
+Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory!
+                ↑                        ↓
+                └────── if mistakes ──────┘
 ```
 
-- **Setup :** Collez votre liste au format `français - espagnol` ou utilisez les mots par défaut.
-- **Quiz :** Choisissez la bonne traduction avec les touches `1` à `4`.
-- **Écriture :** Tapez la réponse. Feedback visuel instantané (vert/rouge).
-- **Révisions :** Le système isole vos erreurs et vous fait pratiquer jusqu'au sans-faute.
-- **Série suivante :** Passage automatique au lot de mots suivant après maîtrise.
+1. **Setup** — Paste your word list (`term - definition`), import from Quizlet, or upload a PDF.
+2. **Quiz** — Choose the correct translation from 4 options.
+3. **Writing** — Type the answer; get instant green/red feedback.
+4. **Review** — Mistakes are re-tested until you get them all right.
+5. **Next batch** — Move on to the next 10 words once you've mastered the current set.
 
-**Astuces :**
+### Tips
+- Press **Enter** everywhere to navigate faster.
+- **"I was right"** button lets you override a typo during writing.
+- Use the **Shuffle** button to avoid memorizing order.
+- Switch the **accent bar** to match your target language.
 
-- Utilisez **Entrée** partout pour accélérer la navigation.
-- Bouton **"J'avais raison"** : Permet de valider manuellement une réponse si vous avez fait une faute de frappe (override).
-- **Shuffle** : Mélangez les mots pour éviter l'apprentissage par cœur de l'ordre.
+---
 
-------
+## 📋 Word List Format
 
-## 📋 Préparation des listes
-
-L'application accepte un format simple dans la zone de texte :
+The textarea accepts this simple format:
 
 ```
-bonjour - hola
-merci - gracias / gracias
-maison - casa
+hello - hola
+goodbye - adiós
+thank you - gracias / merci
 ```
 
-- **Séparateur :** `-`
-- **Variantes :** Utilisez `/` pour plusieurs bonnes réponses (ex: `oui - si / sí`).
+- **Separator:** `-`
+- **Multiple answers:** Use `/` (e.g. `yes - sí / si`)
 
-**Sources recommandées :**
+### Importing from Quizlet
 
-- **Quizlet :** Copier le texte brut (évitez l'export PDF direct).
-- **Anki/CSV :** Conversion manuelle rapide.
-- **Google Trad :** Export de vos listes enregistrées.
+**Option 1 — Text (recommended):**
+1. Open your Quizlet set → `⋯` menu → **Export**
+2. Choose **Tab** delimiter
+3. Click **Copy text**
+4. In VocabMaster, click **Import** → **Paste Text** → paste → **Parse Text** → **Confirm Import**
 
-------
+**Option 2 — PDF:**
+1. Open your Quizlet set → `⋯` menu → **Print** → **Save as PDF**
+2. In VocabMaster, click **Import** → **Upload PDF** → drag & drop or browse
+3. Review the preview and click **Confirm Import**
+
+---
 
 ## 🛠 Tech Stack
 
-- **Frontend :** React 18 + Vite + Tailwind CSS 3.4
-- **Icons :** Lucide React
-- **Lint :** ESLint 9 (Flat Config)
-- **Backend :** Aucun (Client-side only)
+| Technology | Purpose |
+|:---|:---|
+| [React 19](https://react.dev) | UI framework |
+| [Vite 7](https://vitejs.dev) | Build tool & dev server |
+| [Tailwind CSS 3.4](https://tailwindcss.com) | Utility-first styling |
+| [Lucide React](https://lucide.dev) | Icon library |
+| [PDF.js](https://mozilla.github.io/pdf.js/) | Client-side PDF parsing |
+| ESLint 9 | Code linting |
 
-### Packages clés :
+---
 
-Bash
+## 📦 Commands
 
-```
-npm i lucide-react
-npm i -D tailwindcss postcss autoprefixer @tailwindcss/animate
-npx tailwindcss init -p
-```
+| Command | Action |
+|:---|:---|
+| `npm run dev` | Start development server |
+| `npm run build` | Production build → `dist/` |
+| `npm run preview` | Preview production build |
+| `npm run lint` | Run ESLint |
 
-------
+---
 
-## 🔧 Configuration & Build
+## 📄 License
 
-| **Commande**      | **Action**                                       |
-| ----------------- | ------------------------------------------------ |
-| `npm run dev`     | Lance le serveur de développement                |
-| `npm run build`   | Génère les fichiers pour la production (`dist/`) |
-| `npm run lint`    | Analyse le code avec ESLint                      |
-| `npm run preview` | Prévisualise le build de production              |
+MIT — feel free to fork and improve!
 
-------
-
-## 🤖 Roadmap (Ajouts futurs)
-
-- [ ] **PDF Quizlet :** Parsing automatique côté client via PDF.js.
-- [ ] **Import CSV/JSON :** Support du Drag & drop.
-- [ ] **Statistiques :** Visualisation du taux de réussite par série.
-- [ ] **Thèmes :** Support automatique du mode sombre/clair.
-- [ ] **PWA :** Mode hors-ligne pour réviser partout.
-- [ ] **Export :** Sauvegarde de la progression dans le LocalStorage.
-
-------
-
-## 🐛 Résolution de problèmes
-
-| **Problème**             | **Solution**                                                 |
-| ------------------------ | ------------------------------------------------------------ |
-| Erreurs ESLint           | `npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh` |
-| Pas de mots au démarrage | Vérifiez la constante `PDF_WORDS` dans `App.jsx`             |
-| Bug bouton override      | Mise à jour de la fonction `nextWritingStep()`               |
-| Accents sur mobile       | Utilisation du focus auto pour déclencher le clavier natif   |
-
-------
-
-## 📄 Licence & Contribution
-
-**Licence MIT** – N'hésitez pas à forker et à améliorer l'outil !
-
-**Auteur :** [Votre Nom/GitHub]
-
-**Version :** 1.0 (2026)
-
-⭐ **Star si utile !** Partagez vos listes de vocabulaire ou proposez des fonctionnalités via les *Issues*.
+⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
