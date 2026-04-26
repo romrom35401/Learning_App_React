@@ -20,6 +20,9 @@
 | **PDF Import** | Upload a Quizlet "Print → Save as PDF" file |
 | **Text Import** | Paste tab-separated or `term - definition` text |
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
+| **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
+| **Hints** | Reveal letters one by one — but you'll have to review the word! |
+| **Streak Rewards** | 🔥 Track your streak and unlock reward milestones |
 | **Shuffle** | Randomize word order at any time |
 | **Keyboard-first** | `Enter` to validate, `1`–`4` for MCQ, auto-focus everywhere |
 | **Dark UI** | Premium glassmorphism design with smooth animations |
@@ -30,8 +33,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/vocab-app.git
-cd vocab-app
+git clone https://github.com/romrom35401/Learning_App_React.git
+cd Learning_App_React/vocab-app
 
 # Install dependencies
 npm install
@@ -62,6 +65,8 @@ Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
 - **"I was right"** button lets you override a typo during writing.
 - Use the **Shuffle** button to avoid memorizing order.
 - Switch the **accent bar** to match your target language.
+- Toggle **Term→Def / Def→Term** to practice in both directions.
+- Use **Hints** sparingly — hinted words are automatically added to review!
 
 ---
 
@@ -119,41 +124,10 @@ thank you - gracias / merci
 
 ## 📄 License
 
-MIT — feel free to fork and improve!
+**MIT License** — Feel free to fork and improve!
 
-<<<<<<< HEAD
+**Author:** romrom35401
+
+**Version:** 1.0 (2026)
+
 ⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
-=======
-------
-
-## 🤖 Roadmap (Ajouts futurs)
-
-- [ ] **PDF Quizlet :** Parsing automatique côté client via PDF.js.
-- [ ] **Import CSV/JSON :** Support du Drag & drop.
-- [ ] **Statistiques :** Visualisation du taux de réussite par série.
-- [ ] **Thèmes :** Support automatique du mode sombre/clair.
-- [ ] **PWA :** Mode hors-ligne pour réviser partout.
-- [ ] **Export :** Sauvegarde de la progression dans le LocalStorage.
-
-------
-
-## 🐛 Résolution de problèmes
-
-| **Problème**             | **Solution**                                                 |
-| ------------------------ | ------------------------------------------------------------ |
-| Erreurs ESLint           | `npm i -D eslint-plugin-react-hooks eslint-plugin-react-refresh` |
-| Pas de mots au démarrage | Vérifiez la constante `PDF_WORDS` dans `App.jsx`             |
-| Bug bouton override      | Mise à jour de la fonction `nextWritingStep()`               |
-| Accents sur mobile       | Utilisation du focus auto pour déclencher le clavier natif   |
-
-------
-
-## 📄 Licence & Contribution
-
-**Licence MIT** – N'hésitez pas à forker et à améliorer l'outil !
-
-**Auteur :** romrom35401
-
-**Version :** 1.0 (2026)
-
-⭐ **Star si utile !** Partagez vos listes de vocabulaire ou proposez des fonctionnalités via les *Issues*.

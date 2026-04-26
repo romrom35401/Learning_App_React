@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Book, Check, X, RefreshCw, ChevronRight, Edit3, Trophy,
-  Keyboard, Layers, Shuffle, Upload, FileText, Globe, ArrowLeft
+  Keyboard, Layers, Shuffle, Upload, FileText, Globe, ArrowLeft,
+  Eye, Flame, Zap, Star, Award
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import './App.css';
@@ -20,6 +21,15 @@ const ACCENT_PRESETS = {
 };
 
 const BATCH_SIZE = 10;
+
+// Streak reward thresholds
+const STREAK_REWARDS = [
+  { threshold: 3, icon: '🔥', label: 'On Fire!', color: 'from-orange-500 to-red-500' },
+  { threshold: 5, icon: '⚡', label: 'Unstoppable!', color: 'from-yellow-400 to-orange-500' },
+  { threshold: 10, icon: '🌟', label: 'Legendary!', color: 'from-purple-500 to-pink-500' },
+  { threshold: 15, icon: '💎', label: 'Diamond!', color: 'from-cyan-400 to-blue-500' },
+  { threshold: 20, icon: '👑', label: 'Godlike!', color: 'from-yellow-300 to-amber-500' },
+];
 
 // Fisher-Yates shuffle
 const shuffleArray = (array) => {
@@ -60,56 +70,37 @@ const parseQuizletPdf = async (file) => {
     const content = await page.getTextContent();
     const text = content.items.map(item => item.str).join(' ');
 
-    // Quizlet format: "NUMBER.TERM DEFINITION" 
-    // We split by the numbered pattern
     const matches = text.matchAll(/(\d+)\.\s*(.+?)(?=\d+\.|$)/g);
     for (const match of matches) {
       const fullLine = match[2].trim();
-      // Skip page numbers like "1 / 3" and header lines
       if (/^\d+\s*\/\s*\d+$/.test(fullLine)) continue;
       if (fullLine.startsWith('Study online at')) continue;
-
-      // The term and definition are on the same line
-      // Heuristic: split roughly in the middle where language changes
-      // For Quizlet, the format is typically: "ENGLISH_TERM FRENCH_DEFINITION"
-      // We need smarter splitting — look for the boundary
       if (fullLine.length > 0) {
         words.push({ rawLine: fullLine, num: parseInt(match[1]) });
       }
     }
   }
 
-  // Now try to extract term/def pairs from raw lines
-  // Quizlet PDFs typically have "term definition" where there's a language boundary
   const result = words
     .filter(w => !(/^\d+\s*\/\s*\d+$/.test(w.rawLine)))
     .map((w, idx) => {
       const line = w.rawLine;
 
-      // Try common separators first
-      // Check for tab
       if (line.includes('\t')) {
         const parts = line.split('\t');
         return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('\t').trim() };
       }
 
-      // Check for " - " separator
       if (line.includes(' - ')) {
         const dashIdx = line.indexOf(' - ');
         return { id: idx, term: line.slice(0, dashIdx).trim(), def: line.slice(dashIdx + 3).trim() };
       }
 
-      // For Quizlet PDF without separator: detect language boundary
-      // by looking for first non-ASCII character or capital letter change pattern
-      // Heuristic: find a point where the language seems to switch
-      // We'll use a simple approach: find the longest match from the start
-      // that doesn't contain common French/Spanish/etc characters
       const midPoint = findLanguageBoundary(line);
       if (midPoint > 0 && midPoint < line.length - 1) {
         return { id: idx, term: line.slice(0, midPoint).trim(), def: line.slice(midPoint).trim() };
       }
 
-      // Fallback: split in half at a word boundary
       const words_arr = line.split(/\s+/);
       const mid = Math.ceil(words_arr.length / 2);
       return {
@@ -123,14 +114,7 @@ const parseQuizletPdf = async (file) => {
   return result;
 };
 
-// Heuristic to find where language boundary might be in a Quizlet line
 const findLanguageBoundary = (line) => {
-  // Common patterns in Quizlet PDFs:
-  // "English text French text" or "French text English text"
-  // Look for common transition patterns
-
-  // Pattern: uppercase word followed by lowercase in different language
-  // Check for common French/Spanish articles/prepositions appearing
   const foreignIndicators = [
     /\s(le|la|les|un|une|des|du|de|l'|en|au|aux)\s/i,
     /\s(el|la|los|las|un|una|unos|unas|del|de|en|al)\s/i,
@@ -138,7 +122,6 @@ const findLanguageBoundary = (line) => {
     /\s(il|lo|la|i|gli|le|un|una|del|di|in|al)\s/i,
   ];
 
-  // Find the first occurrence of a foreign article pattern
   for (const pattern of foreignIndicators) {
     const match = line.match(pattern);
     if (match && match.index > 2) {
@@ -146,7 +129,6 @@ const findLanguageBoundary = (line) => {
     }
   }
 
-  // Fallback: look for transition from ASCII to accented characters
   for (let i = 3; i < line.length - 3; i++) {
     if (line[i] === ' ' && /[àâéèêëïîôùûçæœáéíóúüñäöüß]/.test(line.slice(i + 1, i + 10))) {
       return i;
@@ -156,17 +138,15 @@ const findLanguageBoundary = (line) => {
   return -1;
 };
 
-// --- Parse Quizlet text export (tab or custom delimiter) ---
-const parseQuizletText = (text, delimiter = '\t') => {
+// --- Parse Quizlet text export ---
+const parseQuizletText = (text) => {
   const lines = text.split('\n').filter(l => l.trim());
   return lines.map((line, idx) => {
     let parts;
-    if (delimiter === '\t' && line.includes('\t')) {
+    if (line.includes('\t')) {
       parts = line.split('\t');
     } else if (line.includes(' - ')) {
       parts = [line.split(' - ')[0], line.split(' - ').slice(1).join(' - ')];
-    } else if (line.includes('\t')) {
-      parts = line.split('\t');
     } else {
       parts = [line, ''];
     }
@@ -185,6 +165,9 @@ export default function App() {
   const [batchOffset, setBatchOffset] = useState(0);
   const [selectedLanguage, setSelectedLanguage] = useState('spanish');
 
+  // Language direction: 'term_to_def' = show term, answer is def. 'def_to_term' = show def, answer is term.
+  const [direction, setDirection] = useState('term_to_def');
+
   const [queue, setQueue] = useState([]);
   const [failedInPhase, setFailedInPhase] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -197,14 +180,57 @@ export default function App() {
   const [showOverrideButton, setShowOverrideButton] = useState(false);
   const [selectedMcqOption, setSelectedMcqOption] = useState(null);
 
+  // Hint system
+  const [hintLevel, setHintLevel] = useState(0); // 0 = no hint, 1+ = number of letters revealed
+  const [usedHint, setUsedHint] = useState(false); // did user use hint on current word?
+  const [hintedWords, setHintedWords] = useState(new Set()); // words that used hints - must be reviewed
+
+  // Streak system
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [totalCorrect, setTotalCorrect] = useState(0);
+  const [showStreakPopup, setShowStreakPopup] = useState(null); // streak reward data to show
+
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importTab, setImportTab] = useState('text'); // 'text' | 'pdf'
+  const [importTab, setImportTab] = useState('text');
   const [importText, setImportText] = useState('');
   const [importPreview, setImportPreview] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Helper: get question and answer based on direction
+  const getQuestion = (word) => direction === 'term_to_def' ? word.term : word.def;
+  const getAnswer = (word) => direction === 'term_to_def' ? word.def : word.term;
+  const getOptionDisplay = (word) => direction === 'term_to_def' ? word.def : word.term;
+
+  // Get hint text for current word
+  const getHintText = useCallback((word, level) => {
+    if (!word || level <= 0) return '';
+    const answer = getAnswer(word);
+    const chars = answer.split('');
+    return chars.map((c, i) => i < level ? c : '_').join('');
+  }, [direction]);
+
+  // ---- Streak helpers ----
+  const handleCorrectAnswer = useCallback(() => {
+    const newStreak = streak + 1;
+    setStreak(newStreak);
+    setTotalCorrect(prev => prev + 1);
+    if (newStreak > bestStreak) setBestStreak(newStreak);
+
+    // Check for streak rewards
+    const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
+    if (reward) {
+      setShowStreakPopup(reward);
+      setTimeout(() => setShowStreakPopup(null), 2000);
+    }
+  }, [streak, bestStreak]);
+
+  const handleWrongAnswer = () => {
+    setStreak(0);
+  };
 
   // ---- Reset ----
   const handleReset = () => {
@@ -216,6 +242,12 @@ export default function App() {
     setFeedback(null);
     setSelectedMcqOption(null);
     setCurrentIndex(0);
+    setStreak(0);
+    setBestStreak(0);
+    setTotalCorrect(0);
+    setHintLevel(0);
+    setUsedHint(false);
+    setHintedWords(new Set());
   };
 
   // ---- Batch Management ----
@@ -225,6 +257,10 @@ export default function App() {
     const shuffledList = shuffleArray(listToUse);
     setAllWords(shuffledList);
     setBatchOffset(0);
+    setStreak(0);
+    setBestStreak(0);
+    setTotalCorrect(0);
+    setHintedWords(new Set());
     startBatch(0, shuffledList);
   };
 
@@ -238,6 +274,8 @@ export default function App() {
     setFeedback(null);
     setInputValue('');
     setSelectedMcqOption(null);
+    setHintLevel(0);
+    setUsedHint(false);
     if (nextBatch.length > 0) {
       generateMcqOptions(nextBatch[0], sourceList);
     }
@@ -258,14 +296,12 @@ export default function App() {
     setInputValue('');
     setShowOverrideButton(false);
     setFeedback(null);
+    setHintLevel(0);
+    setUsedHint(false);
   };
 
   // ---- Review (Loop) ----
   const handleStartReview = useCallback(() => {
-    setQueue(prev => {
-      // We need failedInPhase at call time
-      return failedInPhase;
-    });
     const reviewQueue = failedInPhase;
     setFailedInPhase([]);
     setCurrentIndex(0);
@@ -273,6 +309,8 @@ export default function App() {
     setFeedback(null);
     setSelectedMcqOption(null);
     setInputValue('');
+    setHintLevel(0);
+    setUsedHint(false);
 
     if (appPhase === 'quiz_review_check') {
       setAppPhase('quiz');
@@ -295,7 +333,7 @@ export default function App() {
   };
 
   const handleMcqAnswer = useCallback((selectedWord) => {
-    if (feedback !== null) return; // Prevent double-click
+    if (feedback !== null) return;
     const currentWord = queue[currentIndex];
     if (!currentWord) return;
     const isCorrect = selectedWord.id === currentWord.id;
@@ -303,7 +341,10 @@ export default function App() {
     setSelectedMcqOption(selectedWord);
     setFeedback(isCorrect ? 'correct' : 'incorrect');
 
-    if (!isCorrect) {
+    if (isCorrect) {
+      handleCorrectAnswer();
+    } else {
+      handleWrongAnswer();
       if (!failedInPhase.some(w => w.id === currentWord.id)) {
         setFailedInPhase(prev => [...prev, currentWord]);
       }
@@ -317,13 +358,11 @@ export default function App() {
         setCurrentIndex(nextIndex);
         generateMcqOptions(queue[nextIndex], allWords);
       } else {
-        // End of quiz queue — compute final failed list
         const finalFailed = isCorrect
           ? failedInPhase
           : (failedInPhase.some(w => w.id === currentWord.id) ? failedInPhase : [...failedInPhase, currentWord]);
 
         if (finalFailed.length > 0) {
-          // Make sure failedInPhase is up-to-date for the review screen
           if (!isCorrect && !failedInPhase.some(w => w.id === currentWord.id)) {
             setFailedInPhase(finalFailed);
           }
@@ -333,18 +372,40 @@ export default function App() {
         }
       }
     }, 1000);
-  }, [feedback, queue, currentIndex, failedInPhase, allWords]);
+  }, [feedback, queue, currentIndex, failedInPhase, allWords, handleCorrectAnswer]);
 
   // ---- Writing ----
   const insertCharacter = (char) => {
+    if (feedback === 'incorrect') return; // Don't allow inserting when locked
     setInputValue(prev => prev + char);
     inputRef.current?.focus();
   };
 
-  // Core function to advance to the next writing step
-  // Accepts an optional overrideFailed to avoid stale state issues
+  const handleUseHint = () => {
+    const currentWord = queue[currentIndex];
+    if (!currentWord || feedback !== null) return;
+    
+    const answer = getAnswer(currentWord);
+    const maxHint = answer.length;
+    const newLevel = Math.min(hintLevel + 1, maxHint);
+    setHintLevel(newLevel);
+    setUsedHint(true);
+    
+    // Mark this word as hinted — it must be reviewed
+    setHintedWords(prev => new Set(prev).add(currentWord.id));
+    
+    // Add to failed if not already there
+    if (!failedInPhase.some(w => w.id === currentWord.id)) {
+      setFailedInPhase(prev => [...prev, currentWord]);
+    }
+    
+    inputRef.current?.focus();
+  };
+
   const proceedToNextWritingStep = useCallback((overrideFailed = null) => {
     setShowOverrideButton(false);
+    setHintLevel(0);
+    setUsedHint(false);
 
     if (correctTimeoutRef.current) {
       clearTimeout(correctTimeoutRef.current);
@@ -358,7 +419,6 @@ export default function App() {
       setFeedback(null);
       setInputValue('');
     } else {
-      // End of writing queue
       if (currentFailed.length > 0) {
         setAppPhase('writing_review_check');
       } else {
@@ -372,13 +432,13 @@ export default function App() {
     }
   }, [currentIndex, queue.length, failedInPhase, batchOffset, allWords.length]);
 
-  // FIX: handleOverrideCorrect now computes the new failedInPhase and passes it directly
   const handleOverrideCorrect = useCallback(() => {
     const currentWord = queue[currentIndex];
     const newFailed = failedInPhase.filter(w => w.id !== currentWord.id);
     setFailedInPhase(newFailed);
+    handleCorrectAnswer(); // Give them the streak credit
     proceedToNextWritingStep(newFailed);
-  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep]);
+  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, handleCorrectAnswer]);
 
   const handleWritingSubmit = (e) => {
     e.preventDefault();
@@ -398,17 +458,21 @@ export default function App() {
     }
 
     const currentWord = queue[currentIndex];
-    const isCorrect = checkAnswer(inputValue, currentWord.def);
+    const correctAnswer = getAnswer(currentWord);
+    const isCorrect = checkAnswer(inputValue, correctAnswer);
 
     setFeedback(isCorrect ? 'correct' : 'incorrect');
 
     if (!isCorrect) {
+      handleWrongAnswer();
       if (!failedInPhase.some(w => w.id === currentWord.id)) {
         setFailedInPhase(prev => [...prev, currentWord]);
       }
       setShowOverrideButton(true);
     } else {
-      // If previously failed and now correct in review, remove from failed
+      if (!usedHint) {
+        handleCorrectAnswer();
+      }
       setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id));
       setShowOverrideButton(false);
       correctTimeoutRef.current = setTimeout(() => proceedToNextWritingStep(), 1500);
@@ -417,7 +481,9 @@ export default function App() {
 
   // ---- Import Handlers ----
   const handlePdfUpload = async (file) => {
-    if (!file || file.type !== 'application/pdf') return;
+    if (!file) return;
+    // Accept any file that looks like a PDF
+    if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) return;
     setPdfLoading(true);
     try {
       const words = await parseQuizletPdf(file);
@@ -427,6 +493,10 @@ export default function App() {
       setImportPreview([]);
     }
     setPdfLoading(false);
+    // Reset file input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleTextImport = () => {
@@ -443,14 +513,12 @@ export default function App() {
     }
   };
 
-  // ---- Shuffle on setup ----
   const handleShuffle = () => {
     setAllWords(prev => shuffleArray(prev));
   };
 
   // ---- Effects ----
 
-  // Auto-focus input in writing phase
   useEffect(() => {
     if (appPhase === 'writing' && inputRef.current) {
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -469,17 +537,15 @@ export default function App() {
           correctTimeoutRef.current = null;
         }
 
-        // FIX: compute actual failed state for override scenario
-        const currentWord = queue[currentIndex];
-        const actualFailed = failedInPhase;
-
         if (currentIndex < queue.length - 1) {
           setCurrentIndex(prev => prev + 1);
           setFeedback(null);
           setInputValue('');
           setShowOverrideButton(false);
+          setHintLevel(0);
+          setUsedHint(false);
         } else {
-          if (actualFailed.length > 0) {
+          if (failedInPhase.length > 0) {
             setAppPhase('writing_review_check');
           } else {
             const hasMoreWords = batchOffset + BATCH_SIZE < allWords.length;
@@ -495,7 +561,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase, batchOffset, allWords.length, queue]);
+  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase, batchOffset, allWords.length]);
 
   // Global Enter on transition screens
   useEffect(() => {
@@ -521,10 +587,9 @@ export default function App() {
     if (appPhase !== 'quiz' || feedback !== null) return;
 
     const handleKeyPress = (e) => {
-      const key = e.key;
-      if (['1', '2', '3', '4'].includes(key)) {
+      if (['1', '2', '3', '4'].includes(e.key)) {
         e.preventDefault();
-        const index = parseInt(key) - 1;
+        const index = parseInt(e.key) - 1;
         if (mcqOptions[index]) {
           handleMcqAnswer(mcqOptions[index]);
         }
@@ -540,15 +605,52 @@ export default function App() {
   const currentBatchNum = Math.floor(batchOffset / BATCH_SIZE) + 1;
   const totalBatches = Math.ceil(allWords.length / BATCH_SIZE);
 
+  // Current streak reward level
+  const currentStreakReward = useMemo(() => {
+    return [...STREAK_REWARDS].reverse().find(r => streak >= r.threshold) || null;
+  }, [streak]);
+
   // ============================================================
   // COMPONENTS
   // ============================================================
+
+  const StreakBadge = () => {
+    if (streak < 2) return null;
+    return (
+      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider border animate-pulse-glow
+        ${currentStreakReward 
+          ? `bg-gradient-to-r ${currentStreakReward.color} text-white border-transparent shadow-lg` 
+          : 'bg-orange-500/15 text-orange-400 border-orange-500/20'}`}
+      >
+        <Flame className="w-3.5 h-3.5" />
+        <span>{streak} streak</span>
+        {currentStreakReward && <span>{currentStreakReward.icon}</span>}
+      </div>
+    );
+  };
+
+  // Streak popup notification
+  const StreakPopup = () => {
+    if (!showStreakPopup) return null;
+    return (
+      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 animate-bounce-in">
+        <div className={`bg-gradient-to-r ${showStreakPopup.color} px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3`}>
+          <span className="text-3xl">{showStreakPopup.icon}</span>
+          <div>
+            <p className="text-white font-black text-lg">{showStreakPopup.label}</p>
+            <p className="text-white/70 text-sm">{streak} correct in a row!</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const HeaderInfo = () => (
     <div className="flex justify-between items-center text-white/40 text-xs md:text-sm font-semibold uppercase tracking-wider mb-3">
       <div className="flex items-center gap-2">
         <Layers className="w-4 h-4" />
         <span>Batch {currentBatchNum} / {totalBatches}</span>
+        <StreakBadge />
       </div>
       <div className="flex items-center gap-3">
         <div className="bg-white/5 border border-white/10 px-3 py-1 rounded-lg text-white/50">
@@ -579,7 +681,8 @@ export default function App() {
             key={char}
             type="button"
             onClick={() => insertCharacter(char)}
-            className="accent-btn"
+            disabled={feedback !== null}
+            className="accent-btn disabled:opacity-30 disabled:cursor-not-allowed"
           >
             {char}
           </button>
@@ -588,13 +691,15 @@ export default function App() {
     );
   };
 
-  // ---- Import Modal ----
-  const ImportModal = () => {
+  // ---- Import Modal (rendered as portal-like overlay) ----
+  const renderImportModal = () => {
     if (!showImportModal) return null;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-        <div className="glass-card-elevated w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-slide-up">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+           onClick={(e) => { if (e.target === e.currentTarget) setShowImportModal(false); }}>
+        <div className="glass-card-elevated w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-slide-up"
+             onClick={(e) => e.stopPropagation()}>
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-white/10">
             <div className="flex items-center gap-3">
@@ -662,7 +767,7 @@ export default function App() {
                     e.preventDefault();
                     setIsDragging(false);
                     const file = e.dataTransfer.files[0];
-                    handlePdfUpload(file);
+                    if (file) handlePdfUpload(file);
                   }}
                 >
                   <Upload className="w-10 h-10 text-indigo-400/50 mx-auto mb-3" />
@@ -672,9 +777,12 @@ export default function App() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,application/pdf"
                   className="hidden"
-                  onChange={(e) => handlePdfUpload(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handlePdfUpload(file);
+                  }}
                 />
                 {pdfLoading && (
                   <div className="text-center py-4">
@@ -726,7 +834,8 @@ export default function App() {
   if (appPhase === 'setup') {
     return (
       <div className="gradient-bg flex items-center justify-center p-4">
-        <ImportModal />
+        {renderImportModal()}
+        <StreakPopup />
         <div className="w-full max-w-2xl animate-fade-in">
           <div className="glass-card-elevated overflow-hidden">
             {/* Hero Header */}
@@ -767,6 +876,17 @@ export default function App() {
                   ))}
                 </select>
               </div>
+
+              {/* Direction Toggle */}
+              <button
+                onClick={() => setDirection(d => d === 'term_to_def' ? 'def_to_term' : 'term_to_def')}
+                className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white/60 
+                           hover:bg-cyan-500/10 hover:border-cyan-500/30 hover:text-cyan-300 transition-all text-sm"
+                title="Switch answer direction"
+              >
+                <RefreshCw className="w-4 h-4" />
+                {direction === 'term_to_def' ? 'Term → Def' : 'Def → Term'}
+              </button>
 
               {/* Import Button */}
               <button
@@ -834,6 +954,7 @@ export default function App() {
   if (appPhase === 'quiz_review_check') {
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <StreakPopup />
         <div className="glass-card-elevated w-full max-w-md p-8 text-center animate-slide-up">
           <div className="w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <RefreshCw className="w-8 h-8 text-amber-400" />
@@ -878,6 +999,7 @@ export default function App() {
 
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <StreakPopup />
         <div className="w-full max-w-2xl space-y-4 animate-fade-in">
           <HeaderInfo />
           <ProgressBar current={currentIndex + 1} total={queue.length} color="from-indigo-500 to-purple-500" />
@@ -890,7 +1012,7 @@ export default function App() {
             )}
 
             <span className="text-white/30 text-xs uppercase tracking-[0.2em] font-bold mb-4">Find the translation</span>
-            <h2 className="text-3xl md:text-4xl font-black text-white text-center mb-10">{currentWord.term}</h2>
+            <h2 className="text-3xl md:text-4xl font-black text-white text-center mb-10">{getQuestion(currentWord)}</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
               {mcqOptions.map((option, index) => {
@@ -917,7 +1039,7 @@ export default function App() {
                     <span className="absolute top-2 left-2 w-6 h-6 bg-white/10 text-white/40 rounded-md flex items-center justify-center text-xs font-bold">
                       {index + 1}
                     </span>
-                    <div className="pl-7">{option.def}</div>
+                    <div className="pl-7">{getOptionDisplay(option)}</div>
                   </button>
                 );
               })}
@@ -942,14 +1064,26 @@ export default function App() {
   if (appPhase === 'transition_to_writing') {
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4 text-center">
+        <StreakPopup />
         <div className="glass-card-elevated p-12 max-w-lg w-full animate-bounce-in">
           <div className="w-16 h-16 bg-indigo-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Edit3 className="w-8 h-8 text-indigo-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Quiz Passed! ✨</h2>
-          <p className="text-white/50 mb-8">
+          <p className="text-white/50 mb-4">
             You know these {queue.length} words. Now let's write them to solidify your memory.
           </p>
+          {/* Stats summary */}
+          <div className="flex justify-center gap-6 mb-8">
+            <div className="text-center">
+              <div className="text-2xl font-black text-indigo-400">{totalCorrect}</div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Correct</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-black text-orange-400">{bestStreak}</div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Best Streak</div>
+            </div>
+          </div>
           <button onClick={handleProceedToWritingPhase} className="btn-primary w-full">
             Start Writing <ChevronRight className="w-4 h-4" />
           </button>
@@ -965,6 +1099,7 @@ export default function App() {
   if (appPhase === 'writing_review_check') {
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <StreakPopup />
         <div className="glass-card-elevated w-full max-w-md p-8 text-center animate-slide-up">
           <div className="w-16 h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Edit3 className="w-8 h-8 text-amber-400" />
@@ -1006,8 +1141,12 @@ export default function App() {
       );
     }
 
+    const correctAnswer = getAnswer(currentWord);
+    const isInputLocked = feedback === 'correct' || feedback === 'incorrect';
+
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4">
+        <StreakPopup />
         <div className="w-full max-w-xl space-y-4 animate-fade-in">
           <HeaderInfo />
           <ProgressBar current={currentIndex + 1} total={queue.length} color="from-emerald-500 to-teal-400" />
@@ -1020,7 +1159,32 @@ export default function App() {
             )}
 
             <span className="text-white/30 text-xs uppercase tracking-[0.2em] font-bold mb-2 block text-center">Translate this term</span>
-            <h2 className="text-3xl font-black text-white text-center mb-6">{currentWord.term}</h2>
+            <h2 className="text-3xl font-black text-white text-center mb-2">{getQuestion(currentWord)}</h2>
+
+            {/* Hint display */}
+            {hintLevel > 0 && feedback === null && (
+              <div className="text-center mb-4">
+                <span className="text-indigo-400/60 font-mono text-lg tracking-[0.3em]">
+                  {getHintText(currentWord, hintLevel)}
+                </span>
+              </div>
+            )}
+
+            {/* Hint + usedHint indicator */}
+            {feedback === null && (
+              <div className="flex justify-center mb-4">
+                <button
+                  type="button"
+                  onClick={handleUseHint}
+                  className="flex items-center gap-1.5 text-xs text-white/30 hover:text-indigo-400 transition-all px-3 py-1.5 rounded-lg hover:bg-indigo-500/10"
+                  title="Reveal next letter (word will be reviewed)"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Hint ({hintLevel}/{correctAnswer.length})
+                  {usedHint && <span className="text-amber-400 ml-1">⚠ will be reviewed</span>}
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleWritingSubmit} className="space-y-4">
               <AccentsBar />
@@ -1032,20 +1196,18 @@ export default function App() {
                   type="text"
                   value={inputValue}
                   onChange={(e) => {
+                    if (isInputLocked) return; // Prevent modification when locked
                     setInputValue(e.target.value);
-                    if (feedback !== null && feedback !== 'correct') {
-                      setFeedback(null);
-                      setShowOverrideButton(false);
-                    }
                   }}
-                  disabled={feedback === 'correct'}
+                  disabled={isInputLocked}
+                  readOnly={isInputLocked}
                   placeholder="Type the translation..."
                   className={`input-field
                     ${feedback === 'correct' ? 'input-correct' : ''}
                     ${feedback === 'incorrect' ? 'input-incorrect' : ''}
                   `}
                 />
-                {feedback !== 'correct' && (
+                {!isInputLocked && (
                   <Keyboard className="absolute right-4 top-1/2 -translate-y-1/2 text-white/15 w-5 h-5 pointer-events-none" />
                 )}
               </div>
@@ -1053,7 +1215,7 @@ export default function App() {
               {feedback === 'incorrect' && (
                 <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center animate-slide-down">
                   <p className="text-rose-400/60 text-xs font-bold uppercase mb-1 tracking-wide">Correct answer:</p>
-                  <p className="text-xl font-bold text-rose-300">{currentWord.def}</p>
+                  <p className="text-xl font-bold text-rose-300">{correctAnswer}</p>
                   <p className="text-xs mt-2 text-white/25">
                     Press <kbd className="kbd">Enter</kbd> to continue
                   </p>
@@ -1108,11 +1270,27 @@ export default function App() {
 
     return (
       <div className="gradient-bg flex flex-col items-center justify-center p-4 text-center">
+        <StreakPopup />
         <div className="glass-card-elevated p-12 max-w-lg w-full animate-bounce-in">
           <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Check className="w-8 h-8 text-emerald-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Batch Complete! 🎉</h2>
+          
+          {/* Stats */}
+          <div className="flex justify-center gap-6 mb-6">
+            <div className="text-center">
+              <div className="text-2xl font-black text-emerald-400">{totalCorrect}</div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Total Correct</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-black text-orange-400 flex items-center justify-center gap-1">
+                <Flame className="w-5 h-5" /> {bestStreak}
+              </div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Best Streak</div>
+            </div>
+          </div>
+
           <p className="text-white/50 mb-8">
             Ready for batch <strong className="text-indigo-300">{Math.floor(batchOffset / BATCH_SIZE) + 2}</strong>?
             Words <strong className="text-indigo-300">{nextBatchStart} to {nextBatchEnd}</strong>.
@@ -1157,9 +1335,27 @@ export default function App() {
             <Trophy className="w-16 h-16 text-white" />
           </div>
           <h1 className="text-5xl font-black text-white mb-4">Amazing! 🏆</h1>
-          <p className="text-white/50 text-xl mb-12 max-w-lg mx-auto">
-            You've conquered all <strong className="text-emerald-400">{allWords.length}</strong> words! All batches completed.
+          <p className="text-white/50 text-xl mb-6 max-w-lg mx-auto">
+            You've conquered all <strong className="text-emerald-400">{allWords.length}</strong> words!
           </p>
+
+          {/* Final Stats */}
+          <div className="flex justify-center gap-8 mb-10">
+            <div className="text-center">
+              <div className="text-3xl font-black text-indigo-400">{totalCorrect}</div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Correct Answers</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-black text-orange-400 flex items-center justify-center gap-1">
+                <Flame className="w-6 h-6" /> {bestStreak}
+              </div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Best Streak</div>
+            </div>
+            <div className="text-center">
+              <div className="text-3xl font-black text-emerald-400">{allWords.length}</div>
+              <div className="text-xs text-white/30 uppercase tracking-wider">Words Mastered</div>
+            </div>
+          </div>
 
           <div className="flex gap-4 justify-center flex-col sm:flex-row">
             <button onClick={handleReset} className="btn-primary">
