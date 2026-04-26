@@ -113,8 +113,8 @@ npm run dev
 ## 🛠 Tech Stack
 
 -   React 19 + Vite 7
--   Tailwind CSS 3.4\
--   Lucide React\
+-   Tailwind CSS 3.4
+-   Lucide React
 -   PDF.js
 
 ------------------------------------------------------------------------
