@@ -24,13 +24,41 @@ const ACCENT_PRESETS = {
 const BATCH_SIZE = 10;
 
 // Streak reward thresholds
-const STREAK_REWARDS = [
-  { threshold: 3, icon: '🔥', label: 'On Fire!', color: 'from-orange-500 to-red-500' },
-  { threshold: 5, icon: '⚡', label: 'Unstoppable!', color: 'from-yellow-400 to-orange-500' },
-  { threshold: 10, icon: '🌟', label: 'Legendary!', color: 'from-purple-500 to-pink-500' },
-  { threshold: 15, icon: '💎', label: 'Diamond!', color: 'from-cyan-400 to-blue-500' },
-  { threshold: 20, icon: '👑', label: 'Godlike!', color: 'from-yellow-300 to-amber-500' },
-];
+const STREAK_REWARDS = (() => {
+  const rewards = [
+    { threshold: 3, icon: '🔥', label: 'On Fire!', color: 'from-orange-500 to-red-500' },
+    { threshold: 5, icon: '⚡', label: 'Unstoppable!', color: 'from-yellow-400 to-orange-500' },
+    { threshold: 10, icon: '🌟', label: 'Legendary!', color: 'from-purple-500 to-pink-500' },
+    { threshold: 15, icon: '💎', label: 'Diamond!', color: 'from-cyan-400 to-blue-500' },
+    { threshold: 20, icon: '👑', label: 'Godlike!', color: 'from-yellow-300 to-amber-500' },
+  ];
+
+  for (let threshold = 25; threshold < 50; threshold += 5) {
+    rewards.push({
+      threshold,
+      icon: '🚀',
+      label: `${threshold} Streak!`,
+      color: 'from-indigo-500 to-violet-500',
+    });
+  }
+  for (let threshold = 50; threshold <= 100; threshold += 10) {
+    rewards.push({
+      threshold,
+      icon: '🏆',
+      label: `${threshold} Streak!`,
+      color: 'from-fuchsia-500 to-rose-500',
+    });
+  }
+  for (let threshold = 200; threshold <= 1000; threshold += 100) {
+    rewards.push({
+      threshold,
+      icon: '🌌',
+      label: `${threshold} Streak!`,
+      color: 'from-cyan-400 to-indigo-500',
+    });
+  }
+  return rewards;
+})();
 
 // Fisher-Yates shuffle
 const shuffleArray = (array) => {
@@ -414,7 +442,7 @@ export default function App() {
   const [showOverrideButton, setShowOverrideButton] = useState(false);
   const [selectedMcqOption, setSelectedMcqOption] = useState(null);
 
-  // Hint system — hinted words reviewed ONLY at the very end
+  // Hint system
   const [hintLevel, setHintLevel] = useState(0);
   const [usedHintOnCurrent, setUsedHintOnCurrent] = useState(false);
   const [hintedWordsQueue, setHintedWordsQueue] = useState([]); // words to review at very end
@@ -459,29 +487,51 @@ export default function App() {
   const getQuestion = (word) => direction === 'term_to_def' ? word.term : word.def;
   const getAnswer = (word) => direction === 'term_to_def' ? word.def : word.term;
   const getOptionDisplay = (word) => direction === 'term_to_def' ? word.def : word.term;
+  const formatReviewAnswer = (answer) => {
+    const cleaned = String(answer || '').trim();
+    if (!cleaned.includes('/')) return cleaned;
+    const parts = cleaned.split('/').map(part => part.trim()).filter(Boolean);
+    if (parts.length <= 1) return cleaned;
+    const compacted = parts.map((part, idx) => {
+      if (idx === 0) return part;
+      return part.split(/\s+/)[0] || part;
+    });
+    return compacted.join('/');
+  };
 
   const getHintText = useCallback((word, level) => {
     if (!word || level <= 0) return '';
     const answer = direction === 'term_to_def' ? word.def : word.term;
     const chars = answer.split('');
-    const prioritizedIndexes = [];
-    const stopWords = new Set(['to', 'the', 'a', 'an', 'of']);
     const wordRegex = /[A-Za-zÀ-ÖØ-öø-ÿ]+/g;
+    const words = [];
     let match;
     while ((match = wordRegex.exec(answer)) !== null) {
-      const token = match[0].toLowerCase();
-      if (stopWords.has(token)) continue;
-      prioritizedIndexes.push(match.index);
+      const indices = [];
+      for (let i = 0; i < match[0].length; i++) indices.push(match.index + i);
+      words.push(indices);
     }
-    if (prioritizedIndexes.length === 0) {
-      for (let i = 0; i < chars.length; i++) {
-        if (chars[i].trim() !== '') prioritizedIndexes.push(i);
-      }
+
+    const firstLettersPhase = words
+      .sort((a, b) => b.length - a.length)
+      .map(indices => indices[0]);
+
+    const vowels = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'à', 'â', 'ä', 'é', 'è', 'ê', 'ë', 'î', 'ï', 'ô', 'ö', 'ù', 'û', 'ü', 'æ', 'œ']);
+    const vowelPhase = [];
+    const remainingPhase = [];
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      if (c.trim() === '') continue;
+      if (firstLettersPhase.includes(i)) continue;
+      if (vowels.has(c.toLowerCase())) vowelPhase.push(i);
+      else remainingPhase.push(i);
     }
-    const visible = new Set(prioritizedIndexes.slice(0, Math.max(1, level)));
+
+    const revealOrder = [...firstLettersPhase, ...vowelPhase, ...remainingPhase];
+    const visible = new Set(revealOrder.slice(0, Math.max(1, level)));
     return chars.map((c, i) => {
       if (c.trim() === '') return ' ';
-      return visible.has(i) ? c : ' ';
+      return visible.has(i) ? c : '-';
     }).join('');
   }, [direction]);
 
@@ -701,10 +751,9 @@ export default function App() {
     const currentWord = queue[currentIndex];
     if (!currentWord || feedback !== null) return;
     const answer = getAnswer(currentWord);
-    setHintLevel(prev => Math.min(prev + 1, answer.length));
+    const revealableChars = answer.split('').filter(char => char.trim() !== '').length;
+    setHintLevel(prev => Math.min(prev + 1, revealableChars));
     setUsedHintOnCurrent(true);
-
-    // Mark for review at the very end — NOT in failedInPhase
     if (!hintedWordsQueue.some(w => w.id === currentWord.id)) {
       setHintedWordsQueue(prev => [...prev, currentWord]);
     }
@@ -736,8 +785,7 @@ export default function App() {
         if (hasMoreWords) {
           setAppPhase('batch_complete');
         } else {
-          // Check if there are hinted words to review
-          // We check hintedWordsQueue in the render phase
+          // Check hinted words queue in victory render
           setAppPhase('victory');
         }
       }
@@ -794,7 +842,6 @@ export default function App() {
       if (!usedHintOnCurrent) handleCorrectAnswer();
       // Remove from failedInPhase if previously failed (review round)
       setFailedInPhase(prev => prev.filter(w => w.id !== currentWord.id));
-      // Only clear hinted words in the dedicated hinted review batch.
       if (isHintedReviewRound) {
         setHintedWordsQueue(prev => prev.filter(w => w.id !== currentWord.id));
       }
@@ -960,7 +1007,8 @@ export default function App() {
 
   useEffect(() => {
     const transitionPhases = ['quiz_review_check', 'transition_to_writing', 'writing_review_check', 'batch_complete'];
-    if (!transitionPhases.includes(appPhase)) return;
+    const isHintedVictoryGate = appPhase === 'victory' && hintedWordsQueue.length > 0;
+    if (!transitionPhases.includes(appPhase) && !isHintedVictoryGate) return;
     const handleKeyPress = (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -968,11 +1016,12 @@ export default function App() {
         else if (appPhase === 'transition_to_writing') handleProceedToWritingPhase();
         else if (appPhase === 'writing_review_check') handleStartReview();
         else if (appPhase === 'batch_complete') handleNextBatch();
+        else if (isHintedVictoryGate) handleStartHintedReview();
       }
     };
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [appPhase, handleStartReview]);
+  }, [appPhase, hintedWordsQueue.length, handleStartReview, handleProceedToWritingPhase, handleNextBatch, handleStartHintedReview]);
 
   useEffect(() => {
     if (appPhase !== 'quiz' || feedback !== null) return;
@@ -1062,7 +1111,7 @@ export default function App() {
     <div className={`flex justify-between items-center text-xs md:text-sm font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
       <div className="flex items-center gap-2">
         <Layers className="w-4 h-4" />
-        <span>Batch {currentBatchNum} / {totalBatches}</span>
+        <span>{totalBatches > 1 ? `Batch ${currentBatchNum} / ${totalBatches}` : 'Single session'}</span>
         <StreakBadge />
       </div>
       <div className="flex items-center gap-2">
@@ -1394,7 +1443,7 @@ export default function App() {
           <div className={`rounded-xl p-4 mb-6 max-h-40 overflow-y-auto text-left ${isDark ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-amber-50 border border-amber-200'}`}>
             {failedInPhase.map(w => (
               <div key={w.id} className={`text-sm py-1.5 border-b last:border-0 ${isDark ? 'border-amber-500/10 text-amber-300/80' : 'border-amber-100 text-amber-800'}`}>
-                • {w.term} → <span className="opacity-60">{w.def}</span>
+                • <span className="opacity-90 font-semibold">{formatReviewAnswer(getQuestion(w))}</span>
               </div>
             ))}
           </div>
@@ -1545,20 +1594,83 @@ export default function App() {
 
     const correctAnswer = getAnswer(currentWord);
     const isLocked = feedback === 'correct' || feedback === 'incorrect';
-    const renderAnswerWithHighlights = (user, correct) => {
+    const renderCorrectAnswerWithDiff = (user, correct) => {
       const u = user || '';
       const c = correct || '';
-      const maxLen = Math.max(u.length, c.length);
-      return [...Array(maxLen)].map((_, i) => {
-        const userChar = u[i] ?? '';
-        const correctChar = c[i] ?? '';
-        const isWrong = userChar && userChar.toLowerCase() !== correctChar.toLowerCase();
-        return (
-          <span key={i} className={isWrong ? (isDark ? 'font-black text-rose-200' : 'font-black text-rose-700') : ''}>
-            {userChar || ' '}
-          </span>
-        );
-      });
+      const n = u.length;
+      const m = c.length;
+      const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+      for (let i = 0; i <= n; i++) dp[i][0] = i;
+      for (let j = 0; j <= m; j++) dp[0][j] = j;
+      for (let i = 1; i <= n; i++) {
+        for (let j = 1; j <= m; j++) {
+          const isSame = u[i - 1].toLowerCase() === c[j - 1].toLowerCase();
+          dp[i][j] = isSame
+            ? dp[i - 1][j - 1]
+            : Math.min(
+              dp[i - 1][j - 1] + 1,
+              dp[i - 1][j] + 1,
+              dp[i][j - 1] + 1
+            );
+        }
+      }
+
+      const tokens = [];
+      let i = n;
+      let j = m;
+      let extraCount = 0;
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && u[i - 1].toLowerCase() === c[j - 1].toLowerCase() && dp[i][j] === dp[i - 1][j - 1]) {
+          tokens.push({ char: c[j - 1], wrong: false });
+          i -= 1;
+          j -= 1;
+          continue;
+        }
+        if (j > 0 && dp[i][j] === dp[i][j - 1] + 1) {
+          tokens.push({ char: c[j - 1], wrong: true });
+          j -= 1;
+          continue;
+        }
+        if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + 1) {
+          tokens.push({ char: c[j - 1], wrong: true });
+          i -= 1;
+          j -= 1;
+          continue;
+        }
+        if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) {
+          extraCount += 1;
+          i -= 1;
+          continue;
+        }
+        if (j > 0) {
+          tokens.push({ char: c[j - 1], wrong: true });
+          j -= 1;
+        } else {
+          extraCount += 1;
+          i -= 1;
+        }
+      }
+
+      tokens.reverse();
+      return (
+        <>
+          {tokens.map((token, index) => (
+            <span
+              key={`tok_${index}_${token.char}`}
+              className={token.wrong
+                ? (isDark ? 'font-black text-rose-300' : 'font-black text-rose-600')
+                : (isDark ? 'text-emerald-300' : 'text-emerald-700')}
+            >
+              {token.char}
+            </span>
+          ))}
+          {extraCount > 0 && (
+            <span className={`ml-2 text-xs align-middle ${isDark ? 'text-amber-300/80' : 'text-amber-600'}`}>
+              (+{extraCount} extra)
+            </span>
+          )}
+        </>
+      );
     };
 
     return (
@@ -1572,14 +1684,14 @@ export default function App() {
             {isReviewRound && (
               <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border
                 ${isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                <RefreshCw className="w-3 h-3" /> Correction
+                <RefreshCw className="w-3 h-3" /> Guided review
               </div>
             )}
 
             <span className={`text-xs uppercase tracking-[0.2em] font-bold mb-3 block text-center ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Translate this term</span>
             <h2 className={`text-3xl font-black text-center mb-4 ${isDark ? 'text-white' : 'text-slate-800'}`}>{getQuestion(currentWord)}</h2>
 
-            {hintLevel > 0 && feedback === null && (
+            {!isReviewRound && hintLevel > 0 && feedback === null && (
               <div className="text-center mb-4">
                 <span className={`font-mono text-lg whitespace-pre ${isDark ? 'text-indigo-400/60' : 'text-indigo-500/60'}`}>
                   {getHintText(currentWord, hintLevel)}
@@ -1587,14 +1699,14 @@ export default function App() {
               </div>
             )}
 
-            {feedback === null && (
+            {!isReviewRound && feedback === null && (
               <div className="flex justify-center mb-5">
                 <button type="button" onClick={handleUseHint}
                   className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all
-                    ${isDark ? 'text-white/30 hover:text-indigo-400 hover:bg-indigo-500/10' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}>
+                    ${isDark ? 'text-cyan-300/70 hover:text-cyan-200 hover:bg-cyan-500/15 border border-cyan-400/20' : 'text-cyan-700 hover:text-cyan-800 hover:bg-cyan-50 border border-cyan-200'}`}>
                   <Eye className="w-3.5 h-3.5" />
                   Hint ({hintLevel})
-                  {usedHintOnCurrent && <span className="text-amber-400 ml-1">⚠ reviewed at end</span>}
+                  {usedHintOnCurrent && <span className="text-cyan-500 ml-1">active</span>}
                 </button>
               </div>
             )}
@@ -1618,10 +1730,8 @@ export default function App() {
 
               {feedback === 'incorrect' && (
                 <div className={`p-4 rounded-xl text-center animate-slide-down ${isDark ? 'bg-rose-500/10 border border-rose-500/20' : 'bg-rose-50 border border-rose-200'}`}>
-                  <p className={`text-xs font-bold uppercase mb-1 tracking-wide ${isDark ? 'text-rose-400/60' : 'text-rose-400'}`}>Your answer:</p>
-                  <p className={`text-lg font-mono mb-3 ${isDark ? 'text-rose-100/90' : 'text-rose-900/90'}`}>{renderAnswerWithHighlights(inputValue, correctAnswer)}</p>
                   <p className={`text-xs font-bold uppercase mb-1 tracking-wide ${isDark ? 'text-rose-400/60' : 'text-rose-400'}`}>Correct answer:</p>
-                  <p className={`text-xl font-bold ${isDark ? 'text-rose-300' : 'text-rose-600'}`}>{correctAnswer}</p>
+                  <p className="text-xl font-mono">{renderCorrectAnswerWithDiff(inputValue, correctAnswer)}</p>
                 </div>
               )}
 
@@ -1647,7 +1757,9 @@ export default function App() {
                       type="button"
                       onClick={handleWritingDontKnow}
                       disabled={feedback === 'correct'}
-                      className="btn-secondary flex-1"
+                      className={`flex-1 ${isDark
+                        ? 'btn-secondary'
+                        : 'px-6 py-3.5 rounded-xl font-semibold transition-all duration-200 flex items-center justify-center gap-2 border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                     >
                       <X className="w-4 h-4" /> Don't know
                     </button>

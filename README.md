@@ -23,9 +23,9 @@
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
 | **Custom languages** | Add your own accents/alphabet via "➕ Add a language..." in the dropdown |
 | **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
-| **Hints** | Reveal letters one by one — hinted words reviewed at the end! |
+| **Smart Hints** | Progressive reveal: first letters (longest words first), then vowels, then remaining letters |
 | **Don't know buttons** | One-click "Don't know" in both MCQ and writing modes |
-| **Streak Rewards** | 🔥 Track your streak and unlock reward milestones |
+| **Streak Rewards** | 🔥 Dynamic milestones up to very high streaks (20+, 50+, 100+, and beyond) |
 | **Session stats** | Live accuracy percentage during learning |
 | **Local persistence** | Last setup/import/theme/options are saved locally |
 | **Light / Dark theme** | Toggle between dark glassmorphism and clean light mode |
@@ -54,9 +54,11 @@ npm run dev
 ## 🎮 How It Works
 
 ```
-Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory!
+Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
                 ↑                        ↓
                 └────── if mistakes ──────┘
+                                          ↘
+                              Hinted words final review
 ```
 
 1. **Setup** — Paste your word list (`term - definition`), import from Quizlet, or upload a PDF.
@@ -64,15 +66,17 @@ Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
 3. **Writing** — Type the answer; get instant green/red feedback, or use **Don't know**.
 4. **Review** — Mistakes are re-tested until you get them all right.
 5. **Next batch** — Move on to the next 10 words once you've mastered the current set.
+6. **Hinted words final review** — If hints were used, those words are reviewed one last time without hints.
 
 ### Tips
-- Press **Enter** everywhere to navigate faster.
+- Press **Enter** everywhere to navigate faster (including the final "Write Them Now" hinted review gate).
 - **"I was right"** button lets you override a typo during writing.
 - **Don't know** marks the word as incorrect instantly (MCQ + writing).
 - Use the **Shuffle** button to avoid memorizing order.
 - Switch the **accent bar** to match your target language.
 - Toggle **Term→Def / Def→Term** to practice in both directions.
-- Use **Hints** sparingly — hinted words are reviewed at the very end!
+- Use **Hints** sparingly — in guided review, hints are disabled.
+- Hints display masked letters with `-` and reveal in smart stages (first letters → vowels → remaining letters).
 
 ---
 
