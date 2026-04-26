@@ -19,11 +19,15 @@
 | **Batches of 10** | Learn 100+ words without fatigue |
 | **PDF Import** | Upload a Quizlet "Print → Save as PDF" file |
 | **Text Import** | Paste tab-separated or `term - definition` text |
+| **CSV / JSON Import** | Drag & drop `.csv` and `.json` vocabulary files |
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
+| **Custom languages** | Add your own accents/alphabet (e.g. Russian, Chinese chars) |
 | **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
 | **Hints** | Reveal letters one by one — hinted words reviewed at the end! |
 | **Don't know buttons** | One-click "Don't know" in both MCQ and writing modes |
 | **Streak Rewards** | 🔥 Track your streak and unlock reward milestones |
+| **Session stats** | Live accuracy percentage during learning |
+| **Local persistence** | Last setup/import/theme/options are saved locally |
 | **Light / Dark theme** | Toggle between dark glassmorphism and clean light mode |
 | **Shuffle** | Randomize word order at any time |
 | **Keyboard-first** | `Enter` to validate, `1`–`4` for MCQ, auto-focus everywhere |
@@ -112,10 +116,10 @@ thank you - gracias / merci
 ## 🗺️ Roadmap
 
 - [x] **PDF Parsing** — Worker-safe parsing + page counter cleanup (`3 / 3`)
-- [ ] **CSV / JSON Import** — Drag & drop support for more formats
-- [ ] **Statistics** — Visualize success rate per batch and session
+- [x] **CSV / JSON Import** — Drag & drop support for more formats
+- [x] **Statistics** — Visualize success rate during session (accuracy)
 - [ ] **PWA** — Offline mode for learning on the go
-- [ ] **LocalStorage** — Save progress between sessions
+- [x] **LocalStorage** — Save setup/import/theme/language options between sessions
 - [ ] **Spaced Repetition** — Smart scheduling based on difficulty
 
 ---

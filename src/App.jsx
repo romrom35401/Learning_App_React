@@ -146,6 +146,65 @@ const parseQuizletText = (text) => {
   }).filter(w => w.term && w.def);
 };
 
+const parseSetupText = (text) => {
+  const lines = text.split('\n');
+  return lines
+    .filter(line => line.includes('-'))
+    .map((line, idx) => {
+      const parts = line.split('-');
+      return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('-').trim() };
+    })
+    .filter(w => w.term && w.def);
+};
+
+const parseCsvLine = (line) => {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+};
+
+const parseCsvImport = (text) => {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  return lines
+    .map((line, idx) => {
+      const [term = '', def = ''] = parseCsvLine(line);
+      return { id: idx, term: term.trim(), def: def.trim() };
+    })
+    .filter(w => w.term && w.def);
+};
+
+const parseJsonImport = (text) => {
+  const data = JSON.parse(text);
+  const list = Array.isArray(data) ? data : (Array.isArray(data?.words) ? data.words : []);
+  return list
+    .map((item, idx) => ({
+      id: idx,
+      term: String(item?.term ?? item?.word ?? '').trim(),
+      def: String(item?.def ?? item?.definition ?? item?.translation ?? '').trim(),
+    }))
+    .filter(w => w.term && w.def);
+};
+
+const LOCAL_STORAGE_KEY = 'vocabmaster_state_v2';
+
 
 // ============================================================
 // MAIN APP
@@ -154,6 +213,9 @@ export default function App() {
   const [appPhase, setAppPhase] = useState('setup');
   const [allWords, setAllWords] = useState([]);
   const [setupText, setSetupText] = useState('');
+  const [customPresets, setCustomPresets] = useState([]);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [newPresetChars, setNewPresetChars] = useState('');
   const [batchOffset, setBatchOffset] = useState(0);
   const [selectedLanguage, setSelectedLanguage] = useState('spanish');
   const [direction, setDirection] = useState('term_to_def');
@@ -181,17 +243,27 @@ export default function App() {
   const [streak, setStreak] = useState(0);
   const [bestStreak, setBestStreak] = useState(0);
   const [totalCorrect, setTotalCorrect] = useState(0);
+  const [totalAttempts, setTotalAttempts] = useState(0);
   const [showStreakPopup, setShowStreakPopup] = useState(null);
 
   // Import modal
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTab, setImportTab] = useState('text');
   const [importText, setImportText] = useState('');
+  const [importFileError, setImportFileError] = useState('');
   const [importPreview, setImportPreview] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState('');
   const fileInputRef = useRef(null);
+  const genericFileInputRef = useRef(null);
+
+  const languageOptions = useMemo(() => {
+    const customEntries = customPresets.map(p => [p.key, { label: p.label, chars: p.chars }]);
+    return Object.fromEntries([...Object.entries(ACCENT_PRESETS), ...customEntries]);
+  }, [customPresets]);
+  const parsedSetupWords = useMemo(() => parseSetupText(setupText), [setupText]);
+  const sessionAccuracy = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
   // Theme effect
   useEffect(() => {
@@ -213,7 +285,6 @@ export default function App() {
   const handleCorrectAnswer = useCallback(() => {
     const newStreak = streak + 1;
     setStreak(newStreak);
-    setTotalCorrect(prev => prev + 1);
     if (newStreak > bestStreak) setBestStreak(newStreak);
     const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
     if (reward) {
@@ -223,6 +294,10 @@ export default function App() {
   }, [streak, bestStreak]);
 
   const handleWrongAnswer = () => setStreak(0);
+  const recordAttempt = useCallback((isCorrect) => {
+    setTotalAttempts(prev => prev + 1);
+    if (isCorrect) setTotalCorrect(prev => prev + 1);
+  }, []);
 
   // ---- Reset ----
   const handleReset = () => {
@@ -237,6 +312,7 @@ export default function App() {
     setStreak(0);
     setBestStreak(0);
     setTotalCorrect(0);
+    setTotalAttempts(0);
     setHintLevel(0);
     setUsedHintOnCurrent(false);
     setHintedWordsQueue([]);
@@ -254,6 +330,7 @@ export default function App() {
     setStreak(0);
     setBestStreak(0);
     setTotalCorrect(0);
+    setTotalAttempts(0);
     setHintedWordsQueue([]);
     startBatch(0, shuffledList);
   };
@@ -350,6 +427,7 @@ export default function App() {
     const currentWord = queue[currentIndex];
     if (!currentWord) return;
     const isCorrect = selectedWord.id === currentWord.id;
+    recordAttempt(isCorrect);
 
     setSelectedMcqOption(selectedWord);
     setFeedback(isCorrect ? 'correct' : 'incorrect');
@@ -383,7 +461,7 @@ export default function App() {
         }
       }
     }, 1000);
-  }, [feedback, queue, currentIndex, failedInPhase, allWords, handleCorrectAnswer]);
+  }, [feedback, queue, currentIndex, failedInPhase, allWords, handleCorrectAnswer, recordAttempt]);
 
   // ---- Writing ----
   const insertCharacter = (char) => {
@@ -443,6 +521,7 @@ export default function App() {
     const newFailed = failedInPhase.filter(w => w.id !== currentWord.id);
     setFailedInPhase(newFailed);
     handleCorrectAnswer();
+    setTotalCorrect(prev => prev + 1);
     proceedToNextWritingStep(newFailed);
   }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, handleCorrectAnswer]);
 
@@ -465,6 +544,7 @@ export default function App() {
     const currentWord = queue[currentIndex];
     const correctAnswer = getAnswer(currentWord);
     const isCorrect = checkAnswer(inputValue, correctAnswer);
+    recordAttempt(isCorrect);
 
     setFeedback(isCorrect ? 'correct' : 'incorrect');
 
@@ -494,11 +574,12 @@ export default function App() {
     setInputValue("Don't know");
     setFeedback('incorrect');
     handleWrongAnswer();
+    recordAttempt(false);
     if (!failedInPhase.some(w => w.id === currentWord.id)) {
       setFailedInPhase(prev => [...prev, currentWord]);
     }
     setShowOverrideButton(true);
-  }, [feedback, queue, currentIndex, failedInPhase]);
+  }, [feedback, queue, currentIndex, failedInPhase, recordAttempt]);
 
   // ---- Import Handlers ----
   const handlePdfUpload = async (file) => {
@@ -522,6 +603,24 @@ export default function App() {
   const handleTextImport = () => {
     const words = parseQuizletText(importText);
     setImportPreview(words);
+  };
+
+  const handleGenericFileUpload = async (file) => {
+    if (!file) return;
+    setImportFileError('');
+    try {
+      const content = await file.text();
+      const lowerName = file.name.toLowerCase();
+      let words = [];
+      if (lowerName.endsWith('.json')) words = parseJsonImport(content);
+      else if (lowerName.endsWith('.csv')) words = parseCsvImport(content);
+      else words = parseQuizletText(content);
+      if (words.length === 0) setImportFileError('No valid words found in this file.');
+      setImportPreview(words);
+    } catch (err) {
+      setImportFileError(`Error parsing file: ${err.message}`);
+      setImportPreview([]);
+    }
   };
 
   const confirmImport = () => {
@@ -550,6 +649,36 @@ export default function App() {
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [appPhase, currentIndex]);
+
+  useEffect(() => {
+    const persistedRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!persistedRaw) {
+      setSetupText(wordsToTextarea(allWords));
+      return;
+    }
+    try {
+      const persisted = JSON.parse(persistedRaw);
+      if (Array.isArray(persisted.words)) setAllWords(persisted.words);
+      if (typeof persisted.setupText === 'string') setSetupText(persisted.setupText);
+      if (typeof persisted.selectedLanguage === 'string') setSelectedLanguage(persisted.selectedLanguage);
+      if (typeof persisted.direction === 'string') setDirection(persisted.direction);
+      if (typeof persisted.theme === 'string') setTheme(persisted.theme);
+      if (Array.isArray(persisted.customPresets)) setCustomPresets(persisted.customPresets);
+    } catch {
+      setSetupText(wordsToTextarea(allWords));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({
+      words: allWords,
+      setupText,
+      selectedLanguage,
+      direction,
+      theme,
+      customPresets,
+    }));
+  }, [allWords, setupText, selectedLanguage, direction, theme, customPresets]);
 
   useEffect(() => {
     if (appPhase !== 'writing' || feedback === null) return;
@@ -612,11 +741,32 @@ export default function App() {
   }, [appPhase, feedback, mcqOptions, handleMcqAnswer]);
 
   // ---- Derived ----
-  const accentChars = ACCENT_PRESETS[selectedLanguage]?.chars || [];
+  const accentChars = languageOptions[selectedLanguage]?.chars || [];
   const currentBatchNum = Math.floor(batchOffset / BATCH_SIZE) + 1;
   const totalBatches = Math.ceil(allWords.length / BATCH_SIZE);
   const currentStreakReward = useMemo(() => [...STREAK_REWARDS].reverse().find(r => streak >= r.threshold) || null, [streak]);
   const isDark = theme === 'dark';
+
+  const handleApplySetupText = () => setAllWords(parsedSetupWords);
+
+  const handleAddCustomPreset = () => {
+    const label = newPresetName.trim();
+    const rawChars = newPresetChars.trim();
+    if (!label || !rawChars) return;
+    const key = `custom_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${Date.now()}`;
+    const chars = rawChars.includes(' ')
+      ? [...new Set(rawChars.split(/\s+/).filter(Boolean))]
+      : [...new Set(rawChars.split('').filter(Boolean))];
+    setCustomPresets(prev => [...prev, { key, label, chars }]);
+    setSelectedLanguage(key);
+    setNewPresetName('');
+    setNewPresetChars('');
+  };
+
+  const handleRemoveCustomPreset = (key) => {
+    setCustomPresets(prev => prev.filter(p => p.key !== key));
+    if (selectedLanguage === key) setSelectedLanguage('none');
+  };
 
   // ============================================================
   // COMPONENTS
@@ -672,6 +822,9 @@ export default function App() {
       <div className="flex items-center gap-2">
         <div className={`px-3 py-1 rounded-lg text-xs ${isDark ? 'bg-white/5 border border-white/10 text-white/50' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>
           {appPhase.includes('writing') || appPhase === 'transition_to_writing' ? 'Phase 2: Writing' : 'Phase 1: Quiz'}
+        </div>
+        <div className={`px-3 py-1 rounded-lg text-xs ${isDark ? 'bg-white/5 border border-white/10 text-white/50' : 'bg-slate-100 border border-slate-200 text-slate-500'}`}>
+          Accuracy {sessionAccuracy}%
         </div>
         <ThemeToggle />
         <button onClick={handleReset} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-all ${isDark ? 'text-white/40 hover:text-white/70 hover:bg-white/5' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
@@ -737,13 +890,17 @@ export default function App() {
           </div>
 
           <div className={`flex border-b ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-            {['text', 'pdf'].map(tab => (
+            {['text', 'pdf', 'file'].map(tab => (
               <button key={tab} onClick={() => { setImportTab(tab); setPdfError(''); }}
                 className={`flex-1 py-3 text-sm font-semibold transition-all flex items-center justify-center gap-2
                   ${importTab === tab
                     ? `text-indigo-500 border-b-2 border-indigo-500 ${isDark ? 'bg-indigo-500/5' : 'bg-indigo-50'}`
                     : `${isDark ? 'text-white/40 hover:text-white/60' : 'text-slate-400 hover:text-slate-600'}`}`}>
-                {tab === 'text' ? <><FileText className="w-4 h-4" /> Paste Text</> : <><Upload className="w-4 h-4" /> Upload PDF</>}
+                {tab === 'text'
+                  ? <><FileText className="w-4 h-4" /> Paste Text</>
+                  : tab === 'pdf'
+                    ? <><Upload className="w-4 h-4" /> Upload PDF</>
+                    : <><Upload className="w-4 h-4" /> CSV / JSON</>}
               </button>
             ))}
           </div>
@@ -763,7 +920,7 @@ export default function App() {
                 />
                 <button onClick={handleTextImport} className="btn-primary w-full"><FileText className="w-4 h-4" /> Parse Text</button>
               </div>
-            ) : (
+            ) : importTab === 'pdf' ? (
               <div className="space-y-4">
                 <p className={`text-sm ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
                   Upload a Quizlet PDF (Print → Save as PDF):
@@ -790,6 +947,30 @@ export default function App() {
                 {pdfError && (
                   <div className={`p-4 rounded-xl text-sm ${isDark ? 'bg-rose-500/10 border border-rose-500/20 text-rose-300' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>
                     {pdfError}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className={`text-sm ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
+                  Upload `.csv`, `.json`, or plain text files:
+                </p>
+                <div
+                  className={`drop-zone rounded-xl p-10 text-center cursor-pointer transition-all ${isDragging ? 'drag-over' : ''}`}
+                  onClick={() => genericFileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files[0]) handleGenericFileUpload(e.dataTransfer.files[0]); }}
+                >
+                  <Upload className={`w-10 h-10 mx-auto mb-3 ${isDark ? 'text-indigo-400/50' : 'text-indigo-300'}`} />
+                  <p className={`font-medium ${isDark ? 'text-white/60' : 'text-slate-600'}`}>Drop file here or click to browse</p>
+                  <p className={`text-sm mt-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>CSV: term,definition | JSON: [{'{'}term, def{'}'}]</p>
+                </div>
+                <input ref={genericFileInputRef} type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleGenericFileUpload(f); e.target.value = ''; }} />
+                {importFileError && (
+                  <div className={`p-4 rounded-xl text-sm ${isDark ? 'bg-rose-500/10 border border-rose-500/20 text-rose-300' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>
+                    {importFileError}
                   </div>
                 )}
               </div>
@@ -850,9 +1031,9 @@ export default function App() {
               <div className={`p-4 rounded-xl mb-6 flex gap-3 ${isDark ? 'bg-indigo-500/10 border border-indigo-500/20' : 'bg-indigo-50 border border-indigo-200'}`}>
                 <Layers className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`} />
                 <p className={`text-sm ${isDark ? 'text-indigo-200/80' : 'text-indigo-700'}`}>
-                  This session has <strong>{allWords.length} words</strong>.
-                  The program creates <strong>{Math.ceil(allWords.length / BATCH_SIZE)} batches</strong> in random order.
-                  Edit the list below or import from Quizlet.
+                  This session has <strong>{parsedSetupWords.length} words</strong>.
+                  The program creates <strong>{Math.ceil(parsedSetupWords.length / BATCH_SIZE || 0)} batches</strong> in random order.
+                  Edit the list below or import from Quizlet / CSV / JSON.
                 </p>
               </div>
             </div>
@@ -862,7 +1043,7 @@ export default function App() {
                 <Globe className={`w-4 h-4 ${isDark ? 'text-white/40' : 'text-slate-400'}`} />
                 <select value={selectedLanguage} onChange={(e) => setSelectedLanguage(e.target.value)}
                   className={`bg-transparent text-sm outline-none cursor-pointer ${isDark ? 'text-white/80' : 'text-slate-700'}`}>
-                  {Object.entries(ACCENT_PRESETS).map(([key, val]) => (
+                  {Object.entries(languageOptions).map(([key, val]) => (
                     <option key={key} value={key} className={isDark ? 'bg-slate-800' : 'bg-white'}>{val.label}</option>
                   ))}
                 </select>
@@ -888,30 +1069,60 @@ export default function App() {
             </div>
 
             <div className="px-8 pb-4">
+              <div className={`p-4 rounded-xl border space-y-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                <p className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+                  Custom language accents / alphabet (Russian, Chinese, etc.)
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    value={newPresetName}
+                    onChange={(e) => setNewPresetName(e.target.value)}
+                    placeholder="Language name"
+                    className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                  />
+                  <input
+                    value={newPresetChars}
+                    onChange={(e) => setNewPresetChars(e.target.value)}
+                    placeholder="Chars (all together or space-separated)"
+                    className={`p-3 rounded-lg border outline-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                  />
+                </div>
+                <button onClick={handleAddCustomPreset} className="btn-secondary w-full">Add Custom Language</button>
+                {customPresets.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {customPresets.map(p => (
+                      <button key={p.key} onClick={() => handleRemoveCustomPreset(p.key)}
+                        className={`text-xs px-2 py-1 rounded-lg border ${isDark ? 'text-white/60 border-white/15 hover:bg-white/10' : 'text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
+                        Remove {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="px-8 pb-4">
               <textarea
                 className={`w-full h-52 p-4 rounded-xl font-mono text-sm outline-none resize-none border transition-all
                   ${isDark ? 'bg-white/5 border-white/10 text-white/80 placeholder-white/25 focus:border-indigo-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder-slate-400 focus:border-indigo-500'}`}
                 placeholder={"hello - hola\ngoodbye - adiós\nthank you - gracias / merci"}
                 value={setupText}
-                onChange={(e) => {
-                  const nextText = e.target.value;
-                  setSetupText(nextText);
-                  const lines = nextText.split('\n');
-                  const newWords = lines
-                    .filter(line => line.includes('-'))
-                    .map((line, idx) => {
-                      const parts = line.split('-');
-                      return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('-').trim() };
-                    })
-                    .filter(w => w.term && w.def);
-                  setAllWords(newWords);
-                }}
+                onChange={(e) => setSetupText(e.target.value)}
               />
+              <div className="mt-3">
+                <button onClick={handleApplySetupText} className="btn-secondary w-full">
+                  Apply Text List ({parsedSetupWords.length} words)
+                </button>
+              </div>
             </div>
 
             <div className="px-8 pb-8">
-              <button onClick={() => handleStartFullSession(allWords)} disabled={allWords.length === 0} className="btn-primary w-full text-lg py-4">
-                Start Learning ({allWords.length} words) <ChevronRight className="w-5 h-5" />
+              <button onClick={() => {
+                const words = parseSetupText(setupText);
+                setAllWords(words);
+                handleStartFullSession(words);
+              }} disabled={parsedSetupWords.length === 0} className="btn-primary w-full text-lg py-4">
+                Start Learning ({parsedSetupWords.length} words) <ChevronRight className="w-5 h-5" />
               </button>
             </div>
           </Card>
