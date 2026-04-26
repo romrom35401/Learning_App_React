@@ -1,38 +1,25 @@
 # 🧠 VocabMaster
 
-**A premium vocabulary learning app** with quiz, writing practice, spaced repetition, and Quizlet PDF import. Master any language.
+**A premium vocabulary learning application** featuring quizzes, writing practice, spaced repetition, and seamless PDF imports to help you master any language.
 
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white)
 ![TailwindCSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?logo=tailwindcss&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
----
+------
 
 ## ✨ Features
 
-| Feature | Description |
-|:---|:---|
-| **Quiz (MCQ)** | Pick the correct translation — keyboard shortcuts `1`–`4` |
-| **Writing** | Type the answer with instant visual feedback |
-| **Auto-review loop** | Mistakes are isolated and drilled until 100% mastery |
-| **Batches of 10** | Learn 100+ words without fatigue |
-| **PDF Import** | Upload a Quizlet "Print → Save as PDF" file |
-| **Text Import** | Paste tab-separated or `term - definition` text |
-| **CSV / JSON Import** | Drag & drop `.csv` and `.json` vocabulary files |
-| **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
-| **Custom languages** | Add your own accents/alphabet via "➕ Add a language..." in the dropdown |
-| **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
-| **Smart Hints** | Progressive reveal: first letters (longest words first), then vowels, then remaining letters |
-| **Don't know buttons** | One-click "Don't know" in both MCQ and writing modes |
-| **Streak Rewards** | 🔥 Dynamic milestones up to very high streaks (20+, 50+, 100+, and beyond) |
-| **Session stats** | Live accuracy percentage during learning |
-| **Local persistence** | Last setup/import/theme/options are saved locally |
-| **Light / Dark theme** | Toggle between dark glassmorphism and clean light mode |
-| **Shuffle** | Randomize word order at any time |
-| **Keyboard-first** | `Enter` to validate, `1`–`4` for MCQ, auto-focus everywhere |
+- **Multiple Learning Modes:** MCQ (Multiple Choice) and exact Writing practice.
+- **Auto-review Loop:** Mistakes are isolated and drilled until 100% mastery.
+- **Smart Hints:** Progressive reveal (first letters → vowels → remaining letters).
+- **Flexible Imports:** Seamless PDF extraction, text pasting, and CSV/JSON support.
+- **Multi-language Support:** Custom accent bars for Spanish, French, German, Portuguese, Italian, and custom alphabets.
+- **Direction Toggle:** Learn Term → Def or Def → Term.
+- **Quality of Life:** Dark/Light theme, streak rewards, live session stats, and full keyboard-first navigation (`Enter` to validate, `1`–`4` for MCQ).
 
----
+------
 
 ## 🚀 Getting Started
 
@@ -46,41 +33,15 @@ npm install
 
 # Start the dev server
 npm run dev
-# → opens at http://localhost:5173
 ```
 
----
-
-## 🎮 How It Works
-
-```
-Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
-                ↑                        ↓
-                └────── if mistakes ──────┘
-                                          ↘
-                              Hinted words final review
-```
-
-1. **Setup** — Paste your word list (`term - definition`), import from Quizlet, or upload a PDF.
-2. **Quiz** — Choose the correct translation from 4 options.
-3. **Writing** — Type the answer; get instant green/red feedback, or use **Don't know**.
-4. **Review** — Mistakes are re-tested until you get them all right.
-5. **Next batch** — Move on to the next 10 words once you've mastered the current set.
-6. **Hinted words final review** — If hints were used, those words are reviewed one last time without hints.
-
-### Tips
-- Press **Enter** everywhere to navigate faster (including the final "Write Them Now" hinted review gate).
-- **"I was right"** button lets you override a typo during writing.
-- **Don't know** marks the word as incorrect instantly (MCQ + writing).
-- Use the **Shuffle** button to avoid memorizing order.
-- Switch the **accent bar** to match your target language.
-- Toggle **Term→Def / Def→Term** to practice in both directions.
-- Use **Hints** sparingly — in guided review, hints are disabled.
-- Hints display masked letters with `-` and reveal in smart stages (first letters → vowels → remaining letters).
-
----
+------
 
 ## 📋 Word List Format
+
+VocabMaster relies on a standard text format to parse vocabulary natively:
+
+**Plaintext**
 
 ```
 hello - hola
@@ -89,62 +50,96 @@ thank you - gracias / merci
 ```
 
 - **Separator:** `-`
-- **Multiple answers:** Use `/` (e.g. `yes - sí / si`)
+- **Multiple answers:** Use `/`
 
-### Importing from Quizlet
+------
 
-**Option 1 — Text (recommended):**
-1. Open your Quizlet set → `⋯` menu → **Export**
-2. Choose **Tab** delimiter → **Copy text**
-3. In VocabMaster → **Import** → **Paste Text** → paste → **Parse Text** → **Confirm**
+## 📥 Importing your lists (Quizlet & Custom)
 
-**Option 2 — PDF:**
-1. Open your Quizlet set → `⋯` menu → **Print** → **Save as PDF**
-2. In VocabMaster → **Import** → **Upload PDF** → browse or drag & drop
-3. Review the preview → **Confirm Import**
+### ⭐ Option 1: PDF Upload (Highly Recommended)
 
----
+The fastest and most reliable way to import your lists, especially from Quizlet.
+
+1. Open your Quizlet set → Click the ⋯ menu → Print → Save as PDF.
+2. In VocabMaster, go to Import → Upload PDF and select your file.
+3. The app will automatically parse the terms and definitions for you.
+
+------
+
+### 📝 Option 2: Paste Text (with AI assistance)
+
+If you prefer extracting text manually or don't have a PDF, you can copy the raw text and format it. To save time, you can use an AI to format it instantly.
+
+**AI Prompt Template:**
+
+```
+Format the following text into a list of 'term - definition'. Remove the useless numbers and links. Here is the text:
+```
+
+**Example Input to AI:**
+
+```
+Vocabulary List - Spanish 101
+Study online at https://quizlet.com/_example
+1. Hello Hola
+2. Goodbye Adiós
+3. Please Por favor
+4. Thank you Gracias
+5. How are you? ¿Cómo estás?
+```
+
+**Expected AI Output (Paste this directly into VocabMaster):**
+
+```
+Hello - Hola
+Goodbye - Adiós
+Please - Por favor
+Thank you - Gracias
+How are you? - ¿Cómo estás?
+```
+
+------
+
+## 🛑 Troubleshooting
+
+**PDF parsing error:**
+
+```
+Error parsing PDF: Setting up fake worker failed: "error loading dynamically imported module: http://localhost:5173/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?import"
+```
+
+This error means your local development server has been stopped. Restart it with:
+
+```bash
+npm run dev
+```
+
+------
 
 ## 🛠 Tech Stack
 
-| Technology | Purpose |
-|:---|:---|
-| [React 19](https://react.dev) | UI framework |
-| [Vite 7](https://vitejs.dev) | Build tool & dev server |
-| [Tailwind CSS 3.4](https://tailwindcss.com) | Utility-first styling |
-| [Lucide React](https://lucide.dev) | Icon library |
-| [PDF.js](https://mozilla.github.io/pdf.js/) | Client-side PDF parsing |
+- **Framework:** React 19 + Vite 7
+- **Styling:** Tailwind CSS 3.4
+- **Icons:** Lucide React
+- **Utilities:** PDF.js for client-side parsing
 
----
+------
 
 ## 🗺️ Roadmap
 
-- [x] **PDF Parsing** — Worker-safe parsing + page counter cleanup (`3 / 3`)
-- [x] **CSV / JSON Import** — Drag & drop support for more formats
-- [x] **Statistics** — Visualize success rate during session (accuracy)
-- [ ] **PWA** — Offline mode for learning on the go
-- [x] **LocalStorage** — Save setup/import/theme/language options between sessions
-- [x] **PDF Extraction v2** — Position-based two-column parser (fixes column-mixing bug)
-- [x] **Focus fix** — Textarea stays focused while typing in the home screen
-- [ ] **Spaced Repetition** — Smart scheduling based on difficulty
+-  CSV / JSON Import — Drag & drop support for more formats
+-  Statistics — Visualize success rate during session (accuracy)
+-  LocalStorage — Save setup/import/theme/language options between sessions
+-  Focus fix — Textarea stays focused while typing in the home screen
+-  App / PWA Support — Offline mode and mobile app installation
+-  Export — Sauvegarde de la progression dans le LocalStorage
+-  Spaced Repetition — Smart scheduling based on difficulty
 
----
-
-## 📦 Commands
-
-| Command | Action |
-|:---|:---|
-| `npm run dev` | Start development server |
-| `npm run build` | Production build → `dist/` |
-| `npm run preview` | Preview production build |
-| `npm run lint` | Run ESLint |
-
----
+------
 
 ## 📄 License
 
-**MIT License** — Feel free to fork and improve!
+MIT License — Feel free to fork and improve!
 
-**Author:** romrom35401 · **Version:** 1.1 (2026)
-
-⭐ **Star if useful!** Share your vocab lists or suggest features via Issues.
+**Author:** romrom35401
+**Version:** 1.1 (2026)
