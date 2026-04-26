@@ -55,21 +55,32 @@ const checkAnswer = (userInput, correctDef) => {
   return false;
 };
 
+const wordsToTextarea = (words) => words.map(w => `${w.term} - ${w.def}`).join('\n');
+
 // --- Quizlet PDF Parser ---
 const parseQuizletPdf = async (file) => {
   const arrayBuffer = await file.arrayBuffer();
   // Parse on the main thread to avoid worker loading issues in some Vite setups.
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
   const words = [];
+  const stripPageArtifacts = (value) => (
+    value
+      .replace(/\b\d+\s*\/\s*\d+\b/g, ' ') // page markers like "3 / 3"
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 
   for (let i = 0; i < pdf.numPages; i++) {
     const page = await pdf.getPage(i + 1);
     const content = await page.getTextContent();
-    const text = content.items.map(item => item.str).join(' ');
+    const text = content.items
+      .map(item => item.str)
+      .filter(str => !/^\s*\d+\s*\/\s*\d+\s*$/.test(str)) // remove isolated page counters
+      .join(' ');
 
     const matches = text.matchAll(/(\d+)\.\s*(.+?)(?=\d+\.|$)/g);
     for (const match of matches) {
-      const fullLine = match[2].trim();
+      const fullLine = stripPageArtifacts(match[2].trim());
       if (/^\d+\s*\/\s*\d+$/.test(fullLine)) continue;
       if (fullLine.startsWith('Study online at')) continue;
       if (fullLine.length > 0) {
@@ -142,6 +153,7 @@ const parseQuizletText = (text) => {
 export default function App() {
   const [appPhase, setAppPhase] = useState('setup');
   const [allWords, setAllWords] = useState([]);
+  const [setupText, setSetupText] = useState('');
   const [batchOffset, setBatchOffset] = useState(0);
   const [selectedLanguage, setSelectedLanguage] = useState('spanish');
   const [direction, setDirection] = useState('term_to_def');
@@ -229,6 +241,7 @@ export default function App() {
     setUsedHintOnCurrent(false);
     setHintedWordsQueue([]);
     setIsReviewRound(false);
+    setSetupText(wordsToTextarea(allWords));
   };
 
   // ---- Batch Management ----
@@ -513,7 +526,9 @@ export default function App() {
 
   const confirmImport = () => {
     if (importPreview.length > 0) {
-      setAllWords(importPreview.map((w, i) => ({ ...w, id: i })));
+      const importedWords = importPreview.map((w, i) => ({ ...w, id: i }));
+      setAllWords(importedWords);
+      setSetupText(wordsToTextarea(importedWords));
       setShowImportModal(false);
       setImportPreview([]);
       setImportText('');
@@ -521,7 +536,13 @@ export default function App() {
     }
   };
 
-  const handleShuffle = () => setAllWords(prev => shuffleArray(prev));
+  const handleShuffle = () => {
+    setAllWords(prev => {
+      const shuffled = shuffleArray(prev);
+      setSetupText(wordsToTextarea(shuffled));
+      return shuffled;
+    });
+  };
 
   // ---- Effects ----
   useEffect(() => {
@@ -869,10 +890,22 @@ export default function App() {
             <div className="px-8 pb-4">
               <textarea
                 className={`w-full h-52 p-4 rounded-xl font-mono text-sm outline-none resize-none border transition-all
-                  ${isDark ? 'bg-white/5 border-white/10 text-white/80 placeholder-white/25' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder-slate-400'}`}
+                  ${isDark ? 'bg-white/5 border-white/10 text-white/80 placeholder-white/25 focus:border-indigo-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder-slate-400 focus:border-indigo-500'}`}
                 placeholder={"hello - hola\ngoodbye - adiós\nthank you - gracias / merci"}
-                value={allWords.map(w => `${w.term} - ${w.def}`).join('\n')}
-                readOnly
+                value={setupText}
+                onChange={(e) => {
+                  const nextText = e.target.value;
+                  setSetupText(nextText);
+                  const lines = nextText.split('\n');
+                  const newWords = lines
+                    .filter(line => line.includes('-'))
+                    .map((line, idx) => {
+                      const parts = line.split('-');
+                      return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('-').trim() };
+                    })
+                    .filter(w => w.term && w.def);
+                  setAllWords(newWords);
+                }}
               />
             </div>
 

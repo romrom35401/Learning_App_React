@@ -22,6 +22,7 @@
 | **Multi-language** | Accent bar for Spanish, French, German, Portuguese, Italian |
 | **Direction Toggle** | Choose to answer in either language (Term→Def or Def→Term) |
 | **Hints** | Reveal letters one by one — hinted words reviewed at the end! |
+| **Don't know buttons** | One-click "Don't know" in both MCQ and writing modes |
 | **Streak Rewards** | 🔥 Track your streak and unlock reward milestones |
 | **Light / Dark theme** | Toggle between dark glassmorphism and clean light mode |
 | **Shuffle** | Randomize word order at any time |
@@ -56,13 +57,14 @@ Setup → Quiz (10 words) → Writing → Review loop → Next batch → Victory
 
 1. **Setup** — Paste your word list (`term - definition`), import from Quizlet, or upload a PDF.
 2. **Quiz** — Choose the correct translation from 4 options.
-3. **Writing** — Type the answer; get instant green/red feedback.
+3. **Writing** — Type the answer; get instant green/red feedback, or use **Don't know**.
 4. **Review** — Mistakes are re-tested until you get them all right.
 5. **Next batch** — Move on to the next 10 words once you've mastered the current set.
 
 ### Tips
 - Press **Enter** everywhere to navigate faster.
 - **"I was right"** button lets you override a typo during writing.
+- **Don't know** marks the word as incorrect instantly (MCQ + writing).
 - Use the **Shuffle** button to avoid memorizing order.
 - Switch the **accent bar** to match your target language.
 - Toggle **Term→Def / Def→Term** to practice in both directions.
@@ -109,7 +111,7 @@ thank you - gracias / merci
 
 ## 🗺️ Roadmap
 
-- [ ] **PDF Parsing** — Improve Quizlet PDF auto-parsing heuristics
+- [x] **PDF Parsing** — Worker-safe parsing + page counter cleanup (`3 / 3`)
 - [ ] **CSV / JSON Import** — Drag & drop support for more formats
 - [ ] **Statistics** — Visualize success rate per batch and session
 - [ ] **PWA** — Offline mode for learning on the go
