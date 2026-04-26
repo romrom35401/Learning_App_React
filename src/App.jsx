@@ -291,10 +291,30 @@ const parseQuizletText = (text) => {
 const parseSetupText = (text) => {
   const lines = text.split('\n');
   return lines
-    .filter(line => line.includes('-'))
+    .filter(line => line.trim())
     .map((line, idx) => {
-      const parts = line.split('-');
-      return { id: idx, term: parts[0].trim(), def: parts.slice(1).join('-').trim() };
+      const trimmed = line.trim();
+      if (trimmed.includes('\t')) {
+        const tabParts = trimmed.split('\t');
+        return { id: idx, term: (tabParts[0] || '').trim(), def: tabParts.slice(1).join('\t').trim() };
+      }
+
+      // Use the LAST spaced dash as separator to preserve dashes inside terms,
+      // e.g. "Ray Bradbury (1920 - 2012) - Fahrenheit 451 (1953)".
+      let splitIdx = trimmed.lastIndexOf(' - ');
+      let sepLen = 3;
+      if (splitIdx < 0) {
+        splitIdx = trimmed.lastIndexOf(' – ');
+      }
+      if (splitIdx < 0) {
+        splitIdx = trimmed.lastIndexOf(' — ');
+      }
+      if (splitIdx < 0) {
+        return { id: idx, term: '', def: '' };
+      }
+      const term = trimmed.slice(0, splitIdx).trim();
+      const def = trimmed.slice(splitIdx + sepLen).trim();
+      return { id: idx, term, def };
     })
     .filter(w => w.term && w.def);
 };
@@ -389,6 +409,8 @@ export default function App() {
   const [mcqOptions, setMcqOptions] = useState([]);
   const inputRef = useRef(null);
   const correctTimeoutRef = useRef(null);
+  const streakPopupTimeoutRef = useRef(null);
+  const streakBeforeMistakeRef = useRef(0);
   const [showOverrideButton, setShowOverrideButton] = useState(false);
   const [selectedMcqOption, setSelectedMcqOption] = useState(null);
 
@@ -410,9 +432,12 @@ export default function App() {
   const [importText, setImportText] = useState('');
   const [importFileError, setImportFileError] = useState('');
   const [importPreview, setImportPreview] = useState([]);
+  const [importMode, setImportMode] = useState('append');
   const [isDragging, setIsDragging] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState('');
+  const [shuffleOnStart, setShuffleOnStart] = useState(false);
+  const [sessionWords, setSessionWords] = useState([]);
   const fileInputRef = useRef(null);
   const genericFileInputRef = useRef(null);
 
@@ -440,6 +465,16 @@ export default function App() {
   }, [direction]);
 
   // ---- Streak ----
+  const scheduleStreakPopupClose = useCallback(() => {
+    if (streakPopupTimeoutRef.current) {
+      clearTimeout(streakPopupTimeoutRef.current);
+    }
+    streakPopupTimeoutRef.current = setTimeout(() => {
+      setShowStreakPopup(null);
+      streakPopupTimeoutRef.current = null;
+    }, 2000);
+  }, []);
+
   const handleCorrectAnswer = useCallback(() => {
     const newStreak = streak + 1;
     setStreak(newStreak);
@@ -447,11 +482,14 @@ export default function App() {
     const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
     if (reward) {
       setShowStreakPopup(reward);
-      setTimeout(() => setShowStreakPopup(null), 2000);
+      scheduleStreakPopupClose();
     }
-  }, [streak, bestStreak]);
+  }, [streak, bestStreak, scheduleStreakPopupClose]);
 
-  const handleWrongAnswer = () => setStreak(0);
+  const handleWrongAnswer = useCallback(() => {
+    streakBeforeMistakeRef.current = streak;
+    setStreak(0);
+  }, [streak]);
   const recordAttempt = useCallback((isCorrect) => {
     setTotalAttempts(prev => prev + 1);
     if (isCorrect) setTotalCorrect(prev => prev + 1);
@@ -475,6 +513,12 @@ export default function App() {
     setUsedHintOnCurrent(false);
     setHintedWordsQueue([]);
     setIsReviewRound(false);
+    setSessionWords([]);
+    setShowStreakPopup(null);
+    if (streakPopupTimeoutRef.current) {
+      clearTimeout(streakPopupTimeoutRef.current);
+      streakPopupTimeoutRef.current = null;
+    }
     setSetupText(wordsToTextarea(allWords));
   };
 
@@ -482,15 +526,15 @@ export default function App() {
   const handleStartFullSession = (customList = null) => {
     const listToUse = customList || allWords;
     if (listToUse.length === 0) return;
-    const shuffledList = shuffleArray(listToUse);
-    setAllWords(shuffledList);
+    const sessionList = shuffleOnStart ? shuffleArray(listToUse) : [...listToUse];
+    setSessionWords(sessionList);
     setBatchOffset(0);
     setStreak(0);
     setBestStreak(0);
     setTotalCorrect(0);
     setTotalAttempts(0);
     setHintedWordsQueue([]);
-    startBatch(0, shuffledList);
+    startBatch(0, sessionList);
   };
 
   const startBatch = (offset, sourceList) => {
@@ -514,11 +558,12 @@ export default function App() {
   const handleNextBatch = () => {
     const nextOffset = batchOffset + BATCH_SIZE;
     setBatchOffset(nextOffset);
-    startBatch(nextOffset, allWords);
+    startBatch(nextOffset, sessionWords.length > 0 ? sessionWords : allWords);
   };
 
   const handleProceedToWritingPhase = () => {
-    const currentBatch = allWords.slice(batchOffset, batchOffset + BATCH_SIZE);
+    const sourceList = sessionWords.length > 0 ? sessionWords : allWords;
+    const currentBatch = sourceList.slice(batchOffset, batchOffset + BATCH_SIZE);
     setQueue(currentBatch);
     setFailedInPhase([]);
     setCurrentIndex(0);
@@ -547,13 +592,13 @@ export default function App() {
     if (appPhase === 'quiz_review_check') {
       setAppPhase('quiz');
       if (reviewQueue.length > 0) {
-        generateMcqOptions(reviewQueue[0], allWords);
+        generateMcqOptions(reviewQueue[0], sessionWords.length > 0 ? sessionWords : allWords);
       }
     } else if (appPhase === 'writing_review_check') {
       setAppPhase('writing');
     }
     setQueue(reviewQueue);
-  }, [appPhase, failedInPhase, allWords]);
+  }, [appPhase, failedInPhase, allWords, sessionWords]);
 
   // ---- Start hinted words review (at very end) ----
   const handleStartHintedReview = () => {
@@ -604,7 +649,7 @@ export default function App() {
       if (currentIndex < queue.length - 1) {
         const nextIndex = currentIndex + 1;
         setCurrentIndex(nextIndex);
-        generateMcqOptions(queue[nextIndex], allWords);
+        generateMcqOptions(queue[nextIndex], sessionWords.length > 0 ? sessionWords : allWords);
       } else {
         const finalFailed = isCorrect
           ? failedInPhase
@@ -619,7 +664,7 @@ export default function App() {
         }
       }
     }, 1000);
-  }, [feedback, queue, currentIndex, failedInPhase, allWords, handleCorrectAnswer, recordAttempt]);
+  }, [feedback, queue, currentIndex, failedInPhase, allWords, sessionWords, handleCorrectAnswer, recordAttempt]);
 
   // ---- Writing ----
   const insertCharacter = (char) => {
@@ -662,7 +707,8 @@ export default function App() {
       if (currentFailed.length > 0) {
         setAppPhase('writing_review_check');
       } else {
-        const hasMoreWords = batchOffset + BATCH_SIZE < allWords.length;
+        const sourceLength = (sessionWords.length > 0 ? sessionWords.length : allWords.length);
+        const hasMoreWords = batchOffset + BATCH_SIZE < sourceLength;
         if (hasMoreWords) {
           setAppPhase('batch_complete');
         } else {
@@ -672,16 +718,25 @@ export default function App() {
         }
       }
     }
-  }, [currentIndex, queue.length, failedInPhase, batchOffset, allWords.length]);
+  }, [currentIndex, queue.length, failedInPhase, batchOffset, allWords.length, sessionWords.length]);
 
   const handleOverrideCorrect = useCallback(() => {
     const currentWord = queue[currentIndex];
     const newFailed = failedInPhase.filter(w => w.id !== currentWord.id);
     setFailedInPhase(newFailed);
-    handleCorrectAnswer();
+    const restoredBase = streakBeforeMistakeRef.current > 0 ? streakBeforeMistakeRef.current : streak;
+    const newStreak = restoredBase + 1;
+    setStreak(newStreak);
+    if (newStreak > bestStreak) setBestStreak(newStreak);
+    const reward = [...STREAK_REWARDS].reverse().find(r => newStreak === r.threshold);
+    if (reward) {
+      setShowStreakPopup(reward);
+      scheduleStreakPopupClose();
+    }
+    streakBeforeMistakeRef.current = 0;
     setTotalCorrect(prev => prev + 1);
     proceedToNextWritingStep(newFailed);
-  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, handleCorrectAnswer]);
+  }, [queue, currentIndex, failedInPhase, proceedToNextWritingStep, streak, bestStreak, scheduleStreakPopupClose]);
 
   const handleWritingSubmit = (e) => {
     e.preventDefault();
@@ -783,9 +838,11 @@ export default function App() {
 
   const confirmImport = () => {
     if (importPreview.length > 0) {
-      const importedWords = importPreview.map((w, i) => ({ ...w, id: i }));
-      setAllWords(importedWords);
-      setSetupText(wordsToTextarea(importedWords));
+      const importedWords = importPreview.map((w) => ({ term: w.term, def: w.def }));
+      const baseWords = importMode === 'append' ? allWords : [];
+      const mergedWords = [...baseWords, ...importedWords].map((w, i) => ({ ...w, id: i }));
+      setAllWords(mergedWords);
+      setSetupText(wordsToTextarea(mergedWords));
       setShowImportModal(false);
       setImportPreview([]);
       setImportText('');
@@ -794,11 +851,7 @@ export default function App() {
   };
 
   const handleShuffle = () => {
-    setAllWords(prev => {
-      const shuffled = shuffleArray(prev);
-      setSetupText(wordsToTextarea(shuffled));
-      return shuffled;
-    });
+    setShuffleOnStart(prev => !prev);
   };
 
   // ---- Effects ----
@@ -822,6 +875,8 @@ export default function App() {
       if (typeof persisted.direction === 'string') setDirection(persisted.direction);
       if (typeof persisted.theme === 'string') setTheme(persisted.theme);
       if (Array.isArray(persisted.customPresets)) setCustomPresets(persisted.customPresets);
+      if (typeof persisted.shuffleOnStart === 'boolean') setShuffleOnStart(persisted.shuffleOnStart);
+      if (persisted.importMode === 'append' || persisted.importMode === 'replace') setImportMode(persisted.importMode);
     } catch {
       setSetupText(wordsToTextarea(allWords));
     }
@@ -835,8 +890,10 @@ export default function App() {
       direction,
       theme,
       customPresets,
+      shuffleOnStart,
+      importMode,
     }));
-  }, [allWords, setupText, selectedLanguage, direction, theme, customPresets]);
+  }, [allWords, setupText, selectedLanguage, direction, theme, customPresets, shuffleOnStart, importMode]);
 
   useEffect(() => {
     if (appPhase !== 'writing' || feedback === null) return;
@@ -858,7 +915,8 @@ export default function App() {
           if (failedInPhase.length > 0) {
             setAppPhase('writing_review_check');
           } else {
-            const hasMoreWords = batchOffset + BATCH_SIZE < allWords.length;
+            const sourceLength = (sessionWords.length > 0 ? sessionWords.length : allWords.length);
+            const hasMoreWords = batchOffset + BATCH_SIZE < sourceLength;
             if (hasMoreWords) setAppPhase('batch_complete');
             else setAppPhase('victory');
           }
@@ -867,7 +925,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase, batchOffset, allWords.length]);
+  }, [appPhase, feedback, currentIndex, queue.length, failedInPhase, batchOffset, allWords.length, sessionWords.length]);
 
   useEffect(() => {
     const transitionPhases = ['quiz_review_check', 'transition_to_writing', 'writing_review_check', 'batch_complete'];
@@ -1126,7 +1184,17 @@ export default function App() {
                   <h4 className={`font-semibold text-sm uppercase tracking-wider ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
                     Preview ({importPreview.length} words)
                   </h4>
-                  <button onClick={confirmImport} className="btn-success text-sm py-2 px-4"><Check className="w-4 h-4" /> Confirm Import</button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={importMode}
+                      onChange={(e) => setImportMode(e.target.value)}
+                      className={`text-sm rounded-lg px-2 py-2 border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white/80' : 'bg-white border-slate-200 text-slate-700'}`}
+                    >
+                      <option value="append">Add to current list</option>
+                      <option value="replace">Replace current list</option>
+                    </select>
+                    <button onClick={confirmImport} className="btn-success text-sm py-2 px-4"><Check className="w-4 h-4" /> Confirm Import</button>
+                  </div>
                 </div>
                 <div className={`rounded-xl border max-h-48 overflow-y-auto ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                   {importPreview.slice(0, 20).map((w, i) => (
@@ -1176,7 +1244,8 @@ export default function App() {
                 <Layers className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`} />
                 <p className={`text-sm ${isDark ? 'text-indigo-200/80' : 'text-indigo-700'}`}>
                   This session has <strong>{parsedSetupWords.length} words</strong>.
-                  The program creates <strong>{Math.ceil(parsedSetupWords.length / BATCH_SIZE || 0)} batches</strong> in random order.
+                  The program creates <strong>{Math.ceil(parsedSetupWords.length / BATCH_SIZE || 0)} batches</strong> in list order.
+                  {shuffleOnStart ? ' Session shuffle is ON.' : ' Session shuffle is OFF.'}
                   Edit the list below or import from Quizlet / CSV / JSON.
                 </p>
               </div>
@@ -1208,8 +1277,10 @@ export default function App() {
 
               <button onClick={handleShuffle} disabled={allWords.length === 0}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 transition-all text-sm active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed
-                  ${isDark ? 'bg-white/5 border border-white/10 text-white/60 hover:bg-purple-500/10 hover:text-purple-300' : 'bg-slate-100 border border-slate-200 text-slate-600 hover:bg-purple-50 hover:text-purple-600'}`}>
-                <Shuffle className="w-4 h-4" /> Shuffle
+                  ${shuffleOnStart
+                    ? (isDark ? 'bg-purple-500/20 border border-purple-400/40 text-purple-200' : 'bg-purple-100 border border-purple-300 text-purple-700')
+                    : (isDark ? 'bg-white/5 border border-white/10 text-white/60 hover:bg-purple-500/10 hover:text-purple-300' : 'bg-slate-100 border border-slate-200 text-slate-600 hover:bg-purple-50 hover:text-purple-600')}`}>
+                <Shuffle className="w-4 h-4" /> Session Shuffle: {shuffleOnStart ? 'ON' : 'OFF'}
               </button>
             </div>
 
