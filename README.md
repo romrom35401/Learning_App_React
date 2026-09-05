@@ -130,6 +130,7 @@ npm run dev
 -   [ ] App / PWA Support --- Offline mode and mobile app installation
 -   [ ] Export --- Sauvegarde de la progression dans le LocalStorage
 -   [x] Spaced Repetition --- Smart scheduling based on difficulty
+-   [ ] Quizlet Import --- Importation directement via le lien du quiz
 
 ------------------------------------------------------------------------
 
