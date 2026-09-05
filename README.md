@@ -66,8 +66,8 @@ thank you - gracias / merci
 
 ### ⭐ Option 1: PDF Upload (Highly Recommended)
 
-1.  Open your Quizlet set → Click the ⋯ menu → Print → Save as PDF.\
-2.  In VocabMaster, go to Import → Upload PDF and select your file.\
+1.  Open your Quizlet set → Click the ⋯ menu → Print → Save as PDF.
+2.  In VocabMaster, go to Import → Upload PDF and select your file.
 3.  The app will automatically parse the terms and definitions for you.
 
 ------------------------------------------------------------------------
@@ -113,8 +113,8 @@ npm run dev
 ## 🛠 Tech Stack
 
 -   React 19 + Vite 7
--   Tailwind CSS 3.4\
--   Lucide React\
+-   Tailwind CSS 3.4
+-   Lucide React
 -   PDF.js
 
 ------------------------------------------------------------------------
